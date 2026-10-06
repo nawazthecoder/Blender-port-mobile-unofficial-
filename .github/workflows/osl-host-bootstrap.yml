@@ -68,25 +68,12 @@ jobs:
           echo " Host Toolchain Check"
           echo "=========================================="
 
-          echo "GCC:"
           gcc --version
-
-          echo "G++:"
           g++ --version
-
-          echo "Clang:"
           clang --version
-
-          echo "LLVM:"
           llvm-config --version
-
-          echo "CMake:"
           cmake --version
-
-          echo "Ninja:"
           ninja --version
-
-          echo "Python:"
           python3 --version
 
           echo "Clang TargetInfo:"
@@ -95,16 +82,11 @@ jobs:
 
           echo "Boost.Thread:"
           ldconfig -p | grep boost_thread || true
-
           test -f /usr/lib/x86_64-linux-gnu/libboost_thread.so
-          ls -lh /usr/lib/x86_64-linux-gnu/libboost_thread.so
 
           echo "iconvert:"
           command -v iconvert
           iconvert --help >/dev/null
-
-          echo "System OIIO:"
-          pkg-config --modversion OpenImageIO || true
 
       # ============================================================
       # OpenImageIO 2.5.19.1
@@ -178,8 +160,10 @@ jobs:
             -DSTOP_ON_WARNING=0
 
       - name: Build OpenImageIO
+        shell: bash
         run: |
-          set -eux
+          set -u
+          set -o pipefail
 
           BUILD="$GITHUB_WORKSPACE/oiio-build"
           LOG="$GITHUB_WORKSPACE/oiio-build.log"
@@ -199,19 +183,23 @@ jobs:
           set -e
 
           if [ "$STATUS" -ne 0 ]; then
+            echo
             echo "=========================================="
             echo " OpenImageIO BUILD FAILED"
             echo "=========================================="
 
-            echo "Important errors:"
+            echo
+            echo "========== IMPORTANT ERROR LINES =========="
+
             grep -E \
-              "fatal error:|error:|undefined reference|FAILED:|ninja: build stopped" \
+              "fatal error:|undefined reference|collect2: error|error: |FAILED:|ninja: build stopped" \
               "$LOG" \
-              | tail -80 || true
+              | tail -100 || true
 
             echo
-            echo "Last 100 lines:"
-            tail -100 "$LOG"
+            echo "========== LAST 120 LINES =========="
+
+            tail -120 "$LOG"
 
             exit "$STATUS"
           fi
@@ -233,10 +221,6 @@ jobs:
           set -eux
 
           INSTALL="$GITHUB_WORKSPACE/oiio-install"
-
-          echo "=========================================="
-          echo " Verifying OpenImageIO"
-          echo "=========================================="
 
           test -d "$INSTALL/include"
           test -d "$INSTALL/lib"
@@ -260,9 +244,6 @@ jobs:
               -o -name "*OpenImageIO*.a" \
             \) \
             -print
-
-          echo "Checking OIIO Util dependencies:"
-          ldd "$INSTALL/lib/libOpenImageIO_Util.so.2.5.19" || true
 
       # ============================================================
       # pybind11 3.0.0
@@ -305,10 +286,6 @@ jobs:
           mkdir -p "$BUILD"
           mkdir -p "$INSTALL"
 
-          echo "=========================================="
-          echo " Configuring pybind11 3.0.0"
-          echo "=========================================="
-
           cmake \
             -S "$SOURCE" \
             -B "$BUILD" \
@@ -334,10 +311,6 @@ jobs:
 
           INSTALL="$GITHUB_WORKSPACE/pybind11-install"
 
-          echo "=========================================="
-          echo " Verifying pybind11"
-          echo "=========================================="
-
           test -d "$INSTALL/include"
 
           PYBIND_CONFIG="$(
@@ -351,13 +324,6 @@ jobs:
 
           echo "pybind11 CMake package:"
           echo "$PYBIND_CONFIG"
-
-          echo "pybind11 header:"
-          find "$INSTALL/include" \
-            -maxdepth 2 \
-            -type f \
-            -name "pybind11.h" \
-            -print
 
       # ============================================================
       # OSL 1.15.3.0
@@ -431,7 +397,7 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS="-lboost_thread"
 
       # ============================================================
-      # OSL BUILD WITH COMPACT FAILURE OUTPUT
+      # Build OSL
       # ============================================================
 
       - name: Build OSL
@@ -446,7 +412,6 @@ jobs:
           echo "=========================================="
           echo " Building OSL 1.15.3.0"
           echo "=========================================="
-          echo
 
           set +e
 
@@ -463,12 +428,10 @@ jobs:
             echo "=========================================="
             echo " OSL BUILD FAILED"
             echo "=========================================="
-            echo
-            echo "The full 1400+ line build log was saved to:"
-            echo "$LOG"
-            echo
 
+            echo
             echo "========== IMPORTANT ERROR LINES =========="
+
             grep -E \
               "fatal error:|undefined reference|collect2: error|error: |FAILED:|ninja: build stopped" \
               "$LOG" \
@@ -476,6 +439,7 @@ jobs:
 
             echo
             echo "========== LAST 120 LINES =========="
+
             tail -120 "$LOG"
 
             exit "$STATUS"
@@ -486,42 +450,16 @@ jobs:
           echo " OSL BUILD COMPLETED"
           echo "=========================================="
 
-          echo "Build log:"
-          echo "$LOG"
+      # ============================================================
+      # Verify OSL build products
+      # ============================================================
 
-      - name: Verify oslc
+      - name: Verify oslc and stdosl.h
         run: |
           set -eux
 
           BUILD="$GITHUB_WORKSPACE/osl-build"
-
-          OSLC="$(
-            find "$BUILD" \
-              -type f \
-              -name oslc \
-              -perm -111 \
-              -print \
-              -quit
-          )"
-
-          if [ -z "$OSLC" ]; then
-            echo "ERROR: oslc was not built."
-            exit 1
-          fi
-
-          echo "=========================================="
-          echo " oslc found"
-          echo "=========================================="
-
-          echo "OSLC=$OSLC"
-
-          "$OSLC" --help | head -80
-
-      - name: Compile test OSL shader
-        run: |
-          set -eux
-
-          BUILD="$GITHUB_WORKSPACE/osl-build"
+          SOURCE="$GITHUB_WORKSPACE/osl-source"
 
           OSLC="$(
             find "$BUILD" \
@@ -534,9 +472,124 @@ jobs:
 
           test -n "$OSLC"
 
-          mkdir -p "$GITHUB_WORKSPACE/osl-test"
+          STDOSL="$SOURCE/src/shaders/stdosl.h"
 
-          cat > "$GITHUB_WORKSPACE/osl-test/test.osl" <<'EOF'
+          test -f "$STDOSL"
+
+          echo "=========================================="
+          echo " OSL BUILD PRODUCTS VERIFIED"
+          echo "=========================================="
+
+          echo "OSLC:"
+          echo "$OSLC"
+
+          echo
+          echo "stdosl.h:"
+          echo "$STDOSL"
+
+      # ============================================================
+      # Install OSL
+      #
+      # This gives us a real OSL shader installation in addition
+      # to the source tree. OSL installs stdosl.h and shader files
+      # under the OSL shader installation directory.
+      # ============================================================
+
+      - name: Install OSL
+        run: |
+          set -eux
+
+          BUILD="$GITHUB_WORKSPACE/osl-build"
+          INSTALL="$GITHUB_WORKSPACE/osl-install"
+
+          rm -rf "$INSTALL"
+          mkdir -p "$INSTALL"
+
+          cmake \
+            --install "$BUILD" \
+            --prefix "$INSTALL"
+
+          echo "=========================================="
+          echo " OSL INSTALL COMPLETE"
+          echo "=========================================="
+
+          find "$INSTALL" \
+            -maxdepth 6 \
+            -type f \
+            | sort \
+            | head -200
+
+      # ============================================================
+      # Find the installed stdosl.h
+      # ============================================================
+
+      - name: Locate installed stdosl.h
+        run: |
+          set -eux
+
+          INSTALL="$GITHUB_WORKSPACE/osl-install"
+
+          STDOSL="$(
+            find "$INSTALL" \
+              -type f \
+              -name stdosl.h \
+              -print \
+              -quit
+          )"
+
+          if [ -z "$STDOSL" ]; then
+            echo "ERROR: Installed stdosl.h was not found."
+
+            echo
+            echo "Searching source tree:"
+            find "$GITHUB_WORKSPACE/osl-source" \
+              -type f \
+              -name stdosl.h \
+              -print
+
+            exit 1
+          fi
+
+          echo "Installed stdosl.h:"
+          echo "$STDOSL"
+
+      # ============================================================
+      # Compile test OSL shader
+      # ============================================================
+
+      - name: Compile test OSL shader
+        shell: bash
+        run: |
+          set -u
+          set -o pipefail
+
+          BUILD="$GITHUB_WORKSPACE/osl-build"
+          SOURCE="$GITHUB_WORKSPACE/osl-source"
+          TESTDIR="$GITHUB_WORKSPACE/osl-test"
+          LOG="$GITHUB_WORKSPACE/osl-test.log"
+
+          OSLC="$(
+            find "$BUILD" \
+              -type f \
+              -name oslc \
+              -perm -111 \
+              -print \
+              -quit
+          )"
+
+          test -n "$OSLC"
+
+          # OSL's standard library header is here in the source tree.
+          SHADER_INCLUDE="$SOURCE/src/shaders"
+
+          test -f "$SHADER_INCLUDE/stdosl.h"
+
+          rm -rf "$TESTDIR"
+          mkdir -p "$TESTDIR"
+
+          cat > "$TESTDIR/test.osl" <<'EOF'
+          #include "stdosl.h"
+
           shader test_surface(
               color BaseColor = color(0.8, 0.2, 0.1),
               output closure color BSDF = 0
@@ -546,20 +599,61 @@ jobs:
           }
           EOF
 
-          cd "$GITHUB_WORKSPACE/osl-test"
+          cd "$TESTDIR"
 
-          "$OSLC" -o test.oso test.osl
+          echo "=========================================="
+          echo " Compiling test OSL shader"
+          echo "=========================================="
+
+          set +e
+
+          "$OSLC" \
+            -I "$SHADER_INCLUDE" \
+            -o test.oso \
+            test.osl \
+            > "$LOG" 2>&1
+
+          STATUS=$?
+
+          set -e
+
+          if [ "$STATUS" -ne 0 ]; then
+            echo
+            echo "=========================================="
+            echo " TEST OSL COMPILATION FAILED"
+            echo "=========================================="
+
+            echo
+            echo "========== TEST ERROR =========="
+
+            cat "$LOG"
+
+            echo
+            echo "OSLC:"
+            echo "$OSLC"
+
+            echo
+            echo "Shader include directory:"
+            echo "$SHADER_INCLUDE"
+
+            echo
+            echo "stdosl.h:"
+            ls -lh "$SHADER_INCLUDE/stdosl.h"
+
+            exit "$STATUS"
+          fi
 
           test -f test.oso
 
+          echo
           echo "=========================================="
-          echo " OSL shader compilation successful"
+          echo " TEST OSL COMPILATION SUCCESS"
           echo "=========================================="
 
           ls -lh test.oso
 
       # ============================================================
-      # Upload useful diagnostics
+      # Upload diagnostics
       # ============================================================
 
       - name: Upload OIIO, pybind11 and OSL diagnostics
@@ -575,6 +669,8 @@ jobs:
             pybind11-install
             osl-build.log
             osl-build
+            osl-install
+            osl-test.log
             osl-test/test.oso
           if-no-files-found: warn
 
@@ -592,6 +688,7 @@ jobs:
           echo "Boost.Thread: AVAILABLE"
           echo "OSL 1.15.3.0: BUILT"
           echo "oslc: BUILT"
+          echo "stdosl.h: FOUND"
           echo "test.oso: COMPILED"
           echo
           echo "Next stage: integrate OSL into Blender Android build"
