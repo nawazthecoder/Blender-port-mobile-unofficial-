@@ -1,0 +1,257 @@
+name: Blender 5.2.2 Android - OSL Host Bootstrap
+
+on:
+  workflow_dispatch:
+
+jobs:
+  osl-host:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout our repository
+        uses: actions/checkout@v4
+
+      - name: Show environment
+        run: |
+          set -eux
+
+          echo "=== SYSTEM ==="
+          uname -a
+
+          echo
+          echo "=== CPU ==="
+          nproc
+
+          echo
+          echo "=== MEMORY ==="
+          free -h
+
+          echo
+          echo "=== DISK ==="
+          df -h /
+
+      - name: Install OSL host build dependencies
+        run: |
+          set -eux
+
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            git \
+            curl \
+            pkg-config \
+            bison \
+            flex \
+            libboost-dev \
+            libopenimageio-dev \
+            libopenexr-dev \
+            libimath-dev \
+            libpugixml-dev \
+            llvm-dev \
+            clang
+
+      - name: Verify host dependencies
+        run: |
+          set -eux
+
+          echo "=== CMAKE ==="
+          cmake --version
+
+          echo
+          echo "=== CLANG ==="
+          clang --version
+
+          echo
+          echo "=== LLVM CONFIG ==="
+          llvm-config --version
+
+          echo
+          echo "=== OIIO ==="
+          pkg-config --modversion OpenImageIO || true
+
+          echo
+          echo "=== IMATH ==="
+          pkg-config --modversion Imath || true
+
+          echo
+          echo "=== PUGIXML ==="
+          pkg-config --modversion pugixml || true
+
+          echo
+          echo "=== BISON ==="
+          bison --version | head -1
+
+          echo
+          echo "=== FLEX ==="
+          flex --version
+
+      - name: Download OSL 1.15.3.0
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE"
+
+          OSL_VERSION="1.15.3.0"
+
+          curl -L \
+            --fail \
+            --retry 5 \
+            --retry-all-errors \
+            "https://github.com/AcademySoftwareFoundation/OpenShadingLanguage/archive/refs/tags/v${OSL_VERSION}.tar.gz" \
+            -o "osl-${OSL_VERSION}.tar.gz"
+
+          test -f "osl-${OSL_VERSION}.tar.gz"
+
+          mkdir -p osl-source
+
+          tar -xf \
+            "osl-${OSL_VERSION}.tar.gz" \
+            -C osl-source \
+            --strip-components=1
+
+          test -f osl-source/CMakeLists.txt
+
+          echo "OSL source: OK"
+
+      - name: Configure OSL host build
+        run: |
+          set -eux
+
+          SOURCE="$GITHUB_WORKSPACE/osl-source"
+          BUILD="$GITHUB_WORKSPACE/osl-build"
+
+          rm -rf "$BUILD"
+          mkdir -p "$BUILD"
+
+          cmake \
+            -S "$SOURCE" \
+            -B "$BUILD" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOSL_BUILD_TESTS=OFF \
+            -DOSL_BUILD_PLUGINS=OFF \
+            -DOSL_BUILD_SHADERS=ON \
+            -DOSL_BUILD_DOCS=OFF \
+            -DUSE_QT=OFF \
+            -DUSE_OPTIX=OFF \
+            -DOSL_USE_OPTIX=OFF \
+            -DSTOP_ON_WARNING=0
+
+      - name: Build OSL host
+        run: |
+          set -eux
+
+          BUILD="$GITHUB_WORKSPACE/osl-build"
+
+          cmake \
+            --build "$BUILD" \
+            --parallel "$(nproc)"
+
+      - name: Verify host oslc
+        run: |
+          set -eux
+
+          BUILD="$GITHUB_WORKSPACE/osl-build"
+
+          echo "=== SEARCH FOR OSLC ==="
+
+          find "$BUILD" \
+            -type f \
+            -name oslc \
+            -print
+
+          OSLC="$(
+            find "$BUILD" \
+              -type f \
+              -name oslc \
+              -perm -111 \
+              -print \
+              | head -1
+          )"
+
+          if [ -z "$OSLC" ]; then
+            echo "ERROR: host oslc was not built."
+            exit 1
+          fi
+
+          echo
+          echo "OSLC:"
+          echo "$OSLC"
+
+          echo
+          echo "=== OSLC HELP ==="
+
+          "$OSLC" --help | head -80
+
+          echo
+          echo "Host OSL compiler: OK"
+
+      - name: Test oslc with a Blender-style shader
+        run: |
+          set -eux
+
+          BUILD="$GITHUB_WORKSPACE/osl-build"
+
+          OSLC="$(
+            find "$BUILD" \
+              -type f \
+              -name oslc \
+              -perm -111 \
+              -print \
+              | head -1
+          )"
+
+          mkdir -p "$GITHUB_WORKSPACE/osl-test"
+
+          cat > "$GITHUB_WORKSPACE/osl-test/test.osl" <<'EOF'
+          shader test_surface(
+              color BaseColor = color(0.8, 0.2, 0.1),
+              output closure color BSDF = 0
+          )
+          {
+              BSDF = diffuse(N);
+          }
+          EOF
+
+          cd "$GITHUB_WORKSPACE/osl-test"
+
+          "$OSLC" \
+            -o test.oso \
+            test.osl
+
+          test -f test.oso
+
+          echo
+          echo "Generated OSL object:"
+          ls -lh test.oso
+
+          echo
+          echo "OSL host compiler test: OK"
+
+      - name: Upload OSL host compiler
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: osl-1.15.3.0-host
+          path: |
+            osl-build/bin/oslc
+            osl-test/test.oso
+          if-no-files-found: error
+
+      - name: OSL host bootstrap complete
+        if: success()
+        run: |
+          echo
+          echo "=========================================="
+          echo " OSL 1.15.3.0 HOST BOOTSTRAP COMPLETE"
+          echo "=========================================="
+          echo
+          echo "Host oslc:       FOUND"
+          echo "OSL compilation: OK"
+          echo
+          echo "Next stage:"
+          echo "Android-target OSL runtime + Blender integration"
+          echo "=========================================="
