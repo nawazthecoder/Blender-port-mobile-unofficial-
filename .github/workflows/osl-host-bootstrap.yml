@@ -62,16 +62,11 @@ jobs:
           llvm-config --version
 
           echo "iconvert:"
-          command -v iconvert || true
-          iconvert --help >/dev/null || true
+          command -v iconvert
+          iconvert --help >/dev/null
 
           echo "System OIIO version:"
           pkg-config --modversion OpenImageIO || true
-
-      # ------------------------------------------------------------
-      # Build OpenImageIO 2.5.x from source.
-      # Ubuntu 24.04 provides OIIO 2.4.x, which is too old for OSL 1.15.
-      # ------------------------------------------------------------
 
       - name: Download OpenImageIO 2.5.19.1
         run: |
@@ -88,7 +83,6 @@ jobs:
           test -f "oiio-${OIIO_VERSION}.tar.gz"
 
           rm -rf oiio-source
-
           mkdir -p oiio-source
 
           tar -xf "oiio-${OIIO_VERSION}.tar.gz" \
@@ -106,7 +100,6 @@ jobs:
           INSTALL="$GITHUB_WORKSPACE/oiio-install"
 
           rm -rf "$BUILD" "$INSTALL"
-
           mkdir -p "$BUILD" "$INSTALL"
 
           echo "=========================================="
@@ -146,7 +139,7 @@ jobs:
           BUILD="$GITHUB_WORKSPACE/oiio-build"
 
           echo "=========================================="
-          echo " Building OpenImageIO"
+          echo " Building OpenImageIO 2.5.19.1"
           echo "=========================================="
 
           cmake --build "$BUILD" \
@@ -169,27 +162,23 @@ jobs:
           INSTALL="$GITHUB_WORKSPACE/oiio-install"
 
           echo "OIIO install directory:"
-          find "$INSTALL" -maxdepth 3 -type f | sort | head -100
+          find "$INSTALL" -maxdepth 4 -type f | sort | head -150
 
           test -d "$INSTALL/include"
           test -d "$INSTALL/lib"
 
-          echo "Installed OIIO files:"
+          echo "Installed OIIO libraries:"
           find "$INSTALL" \
-            \( -name '*OpenImageIO*.so*' \
-            -o -name '*OpenImageIO*.a' \
-            -o -name 'OpenImageIOConfig.cmake' \
+            \( \
+              -name '*OpenImageIO*.so*' \
+              -o -name '*OpenImageIO*.a' \
             \) \
             -print
 
-          echo "Installed CMake package:"
+          echo "Installed OIIO CMake package:"
           find "$INSTALL" \
             -name 'OpenImageIOConfig.cmake' \
             -print
-
-      # ------------------------------------------------------------
-      # OSL 1.15.3.0
-      # ------------------------------------------------------------
 
       - name: Download OSL 1.15.3.0
         run: |
@@ -206,7 +195,6 @@ jobs:
           test -f "osl-${OSL_VERSION}.tar.gz"
 
           rm -rf osl-source
-
           mkdir -p osl-source
 
           tar -xf "osl-${OSL_VERSION}.tar.gz" \
@@ -230,7 +218,9 @@ jobs:
 
           export OpenImageIO_ROOT="$OIIO"
 
-          export CMAKE_PREFIX_PATH="$OIIO:$CMAKE_PREFIX_PATH"
+          # Avoid "unbound variable" when CMAKE_PREFIX_PATH
+          # does not already exist in the GitHub Actions environment.
+          export CMAKE_PREFIX_PATH="$OIIO:${CMAKE_PREFIX_PATH:-}"
 
           echo "=========================================="
           echo " Configuring OSL 1.15.3.0"
