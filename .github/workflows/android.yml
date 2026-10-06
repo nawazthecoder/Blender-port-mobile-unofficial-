@@ -1,23 +1,23 @@
-name: Blender 5.2.2 Android Port Probe
+name: Blender 5.2.2 Android - Python Bootstrap
 
 on:
   workflow_dispatch:
 
 jobs:
-  android-probe:
+  python-bootstrap:
     runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout our repository
         uses: actions/checkout@v4
 
-      - name: Show build environment
+      - name: Show environment
         run: |
           set -eux
 
           echo "=== SYSTEM ==="
           uname -a
-          echo "CPU cores: $(nproc)"
+          echo "CPU: $(nproc)"
           echo
 
           echo "=== MEMORY ==="
@@ -31,13 +31,17 @@ jobs:
         run: |
           set -eux
 
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_NDK=$ANDROID_NDK"
+          echo
+
           NDK="$ANDROID_NDK"
           TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 
           test -d "$NDK"
           test -x "$TOOLCHAIN/bin/clang"
 
-          echo "=== NDK ==="
+          echo "=== NDK VERSION ==="
           cat "$NDK/source.properties"
 
           echo
@@ -55,28 +59,15 @@ jobs:
             -o /tmp/test.o
 
           echo
-          echo "ARM64 Android compiler: OK"
+          echo "Android ARM64 compiler: OK"
 
-      - name: Check build tools
+      - name: Check Java
         run: |
           set -eux
 
-          echo "=== CMAKE ==="
-          cmake --version
+          java -version
 
-          echo
-          echo "=== NINJA ==="
-          ninja --version
-
-          echo
-          echo "=== PYTHON ==="
-          python3 --version
-
-          echo
-          echo "=== GIT ==="
-          git --version
-
-      - name: Download Blender 5.2.2
+      - name: Determine Blender Python version
         run: |
           set -eux
 
@@ -89,177 +80,179 @@ jobs:
             "https://download.blender.org/source/blender-5.2.2.tar.xz" \
             -o blender-5.2.2.tar.xz
 
-          test -f blender-5.2.2.tar.xz
-
-          echo "Downloaded Blender source:"
-          ls -lh blender-5.2.2.tar.xz
-
           tar -xf blender-5.2.2.tar.xz
 
-          test -d blender-5.2.2
-
-      - name: Install our Android platform file
-        run: |
-          set -eux
-
-          SOURCE="$GITHUB_WORKSPACE/src/blender-5.2.2"
-          OUR_FILE="$GITHUB_WORKSPACE/build_files/cmake/platform/platform_android.cmake"
-          DEST="$SOURCE/build_files/cmake/platform/platform_android.cmake"
-
-          test -f "$OUR_FILE"
-
-          mkdir -p "$SOURCE/build_files/cmake/platform"
-
-          cp "$OUR_FILE" "$DEST"
-
-          echo
-          echo "=== OUR ANDROID PLATFORM FILE ==="
-          cat "$DEST"
-
-      - name: Patch Blender platform selection
-        run: |
-          set -eux
-
-          SOURCE="$GITHUB_WORKSPACE/src/blender-5.2.2"
-          CMAKE_FILE="$SOURCE/CMakeLists.txt"
-
-          cp "$CMAKE_FILE" "$CMAKE_FILE.original"
-
-          python3 - "$CMAKE_FILE" <<'PY'
-          from pathlib import Path
-          import sys
-
-          path = Path(sys.argv[1])
-          text = path.read_text()
-
-          target = "include(platform_unix)"
-
-          replacement = """if(ANDROID)
-            include(platform_android)
-          else()
-            include(platform_unix)
-          endif()"""
-
-          count = text.count(target)
-
-          print(f"Found include(platform_unix) count: {count}")
-
-          if count != 1:
-              raise SystemExit(
-                  f"Expected exactly one include(platform_unix), found {count}"
-              )
-
-          text = text.replace(target, replacement, 1)
-
-          path.write_text(text)
-
-          print("Android platform selection patched successfully.")
-          PY
-
-      - name: Verify platform selection
-        run: |
-          set -eux
-
           SOURCE="$GITHUB_WORKSPACE/src/blender-5.2.2"
 
-          echo "=== ANDROID PLATFORM SELECTION ==="
+          echo "Searching Blender 5.2.2 for Python version..."
 
-          grep -n -A8 -B5 \
-            "include(platform_android)" \
-            "$SOURCE/CMakeLists.txt"
+          PYTHON_VERSION="$(
+            sed -n 's/^set(PYTHON_VERSION \([0-9.]*\)).*/\1/p' \
+              "$SOURCE/build_files/build_environment/cmake/versions.cmake" \
+              | head -1
+          )"
 
-          echo
-          echo "=== VERIFY ANDROID FILE ==="
-
-          test -f \
-            "$SOURCE/build_files/cmake/platform/platform_android.cmake"
-
-          grep -q \
-            "Configuring Blender for Android" \
-            "$SOURCE/build_files/cmake/platform/platform_android.cmake"
-
-          echo
-          echo "Android platform integration: OK"
-
-      - name: Configure Blender for Android
-        continue-on-error: true
-        run: |
-          set -o pipefail
-
-          SOURCE="$GITHUB_WORKSPACE/src/blender-5.2.2"
-          BUILD="$GITHUB_WORKSPACE/build-android"
-
-          rm -rf "$BUILD"
-          mkdir -p "$BUILD"
-
-          cd "$BUILD"
-
-          echo
-          echo "=========================================="
-          echo " Blender 5.2.2 Android Configure"
-          echo "=========================================="
-          echo
-
-          cmake -G Ninja \
-            -DCMAKE_SYSTEM_NAME=Android \
-            -DCMAKE_ANDROID_NDK="$ANDROID_NDK" \
-            -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a \
-            -DCMAKE_ANDROID_API=29 \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DWITH_GHOST_X11=OFF \
-            -DWITH_GHOST_WAYLAND=OFF \
-            -DWITH_GHOST_SDL=OFF \
-            -DWITH_HEADLESS=OFF \
-            -DWITH_VULKAN_BACKEND=ON \
-            -DWITH_OPENGL_BACKEND=OFF \
-            -DWITH_LIBS_PRECOMPILED=OFF \
-            "$SOURCE" \
-            2>&1 | tee cmake-android.log
-
-      - name: Show configure result
-        if: always()
-        run: |
-          LOG="$GITHUB_WORKSPACE/build-android/cmake-android.log"
-
-          echo
-          echo "=========================================="
-          echo " CONFIGURE RESULT"
-          echo "=========================================="
-
-          if [ -f "$LOG" ]; then
-
-            echo
-            echo "=== ANDROID PLATFORM ==="
-
-            grep -n -E \
-              "Configuring Blender for Android|Android platform configuration loaded|Android ABI|Android API" \
-              "$LOG" || true
-
-            echo
-            echo "=== ERRORS ==="
-
-            grep -n -E \
-              "CMake Error|Could NOT find|NOTFOUND|not found|unsupported|Unsupported|error:" \
-              "$LOG" \
-              | tail -100 || true
-
-            echo
-            echo "=== LAST 250 LINES ==="
-
-            tail -250 "$LOG"
-
-          else
-            echo "No CMake log was produced."
+          if [ -z "$PYTHON_VERSION" ]; then
+            echo "Could not determine Blender Python version."
+            exit 1
           fi
 
-      - name: Upload diagnostics
-        if: always()
+          echo "Blender requires Python: $PYTHON_VERSION"
+
+          echo "PYTHON_VERSION=$PYTHON_VERSION" >> "$GITHUB_ENV"
+
+      - name: Download matching CPython source
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE"
+
+          PYTHON_FILE="Python-${PYTHON_VERSION}.tar.xz"
+          PYTHON_URL="https://www.python.org/ftp/python/${PYTHON_VERSION}/${PYTHON_FILE}"
+
+          echo "Downloading:"
+          echo "$PYTHON_URL"
+
+          curl -L \
+            --fail \
+            --retry 3 \
+            "$PYTHON_URL" \
+            -o "$PYTHON_FILE"
+
+          test -f "$PYTHON_FILE"
+
+          mkdir -p cpython
+
+          tar -xf "$PYTHON_FILE" \
+            -C cpython \
+            --strip-components=1
+
+          test -f cpython/Platforms/Android/README.md
+
+          echo
+          echo "CPython source:"
+          ls -la cpython | head -40
+
+      - name: Check CPython Android build system
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE/cpython"
+
+          echo "=== CPython Android files ==="
+
+          ls -la Platforms/Android
+
+          echo
+          echo "=== Android build help ==="
+
+          python3 Platforms/Android configure-host --help
+
+      - name: Build CPython for Android ARM64
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE/cpython"
+
+          HOST="aarch64-linux-android"
+
+          echo "=========================================="
+          echo " Building CPython ${PYTHON_VERSION}"
+          echo " Target: ${HOST}"
+          echo "=========================================="
+
+          python3 Platforms/Android build "$HOST"
+
+      - name: Verify Android Python
+        run: |
+          set -eux
+
+          PYTHON_DIR="$GITHUB_WORKSPACE/cpython/cross-build/aarch64-linux-android"
+
+          echo "Looking for Android Python at:"
+          echo "$PYTHON_DIR"
+
+          test -d "$PYTHON_DIR"
+
+          echo
+          echo "=== PREFIX ==="
+          find "$PYTHON_DIR/prefix" -maxdepth 2 -type d | head -50
+
+          echo
+          echo "=== PYTHON HEADERS ==="
+
+          find "$PYTHON_DIR/prefix" \
+            -name Python.h \
+            -print
+
+          PYTHON_HEADER="$(
+            find "$PYTHON_DIR/prefix" \
+              -name Python.h \
+              -print \
+              | head -1
+          )"
+
+          if [ -z "$PYTHON_HEADER" ]; then
+            echo "ERROR: Python.h was not produced."
+            exit 1
+          fi
+
+          echo
+          echo "Python.h found:"
+          echo "$PYTHON_HEADER"
+
+          echo
+          echo "=== PYTHON LIBRARIES ==="
+
+          find "$PYTHON_DIR/prefix/lib" \
+            -maxdepth 1 \
+            -type f \
+            | sort || true
+
+          PYTHON_LIBRARY="$(
+            find "$PYTHON_DIR/prefix/lib" \
+              -maxdepth 1 \
+              -type f \
+              \( -name 'libpython*.so' -o -name 'libpython*.a' \) \
+              -print \
+              | head -1
+          )"
+
+          if [ -z "$PYTHON_LIBRARY" ]; then
+            echo "ERROR: No libpython library was produced."
+            exit 1
+          fi
+
+          echo
+          echo "Python library found:"
+          echo "$PYTHON_LIBRARY"
+
+          echo
+          echo "=== PYTHON PREFIX ==="
+          du -sh "$PYTHON_DIR/prefix"
+
+      - name: Save Android Python
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: blender-5.2.2-android-probe
+          name: python-${{ env.PYTHON_VERSION }}-android-arm64
           path: |
-            build-android/cmake-android.log
-            src/blender-5.2.2/CMakeLists.txt.original
-            src/blender-5.2.2/CMakeLists.txt
-            src/blender-5.2.2/build_files/cmake/platform/platform_android.cmake
-          if-no-files-found: warn
+            cpython/cross-build/aarch64-linux-android/prefix
+          if-no-files-found: error
+
+      - name: Bootstrap complete
+        if: success()
+        run: |
+          echo
+          echo "=========================================="
+          echo " Android Python Bootstrap Complete"
+          echo "=========================================="
+          echo
+          echo "Blender Python version: $PYTHON_VERSION"
+          echo "Android target:        aarch64-linux-android"
+          echo "Python.h:              FOUND"
+          echo "libpython:             FOUND"
+          echo
+          echo "Next stage:"
+          echo "Connect Android Python to Blender 5.2.2"
+          echo "=========================================="
