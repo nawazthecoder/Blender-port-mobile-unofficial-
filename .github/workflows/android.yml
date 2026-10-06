@@ -8,9 +8,15 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
+      # ------------------------------------------------------------
+      # Get OUR repository files.
+      # ------------------------------------------------------------
       - name: Checkout our port
         uses: actions/checkout@v4
 
+      # ------------------------------------------------------------
+      # Show the build machine.
+      # ------------------------------------------------------------
       - name: Show build environment
         run: |
           set -eux
@@ -18,12 +24,24 @@ jobs:
           echo "=== SYSTEM ==="
           uname -a
           echo "CPU cores: $(nproc)"
+          echo
+
+          echo "=== MEMORY ==="
           free -h
+          echo
+
+          echo "=== DISK ==="
           df -h /
 
-      - name: Check Android NDK
+      # ------------------------------------------------------------
+      # Verify Android NDK and ARM64 compiler.
+      # ------------------------------------------------------------
+      - name: Check Android toolchain
         run: |
           set -eux
+
+          echo "ANDROID_NDK=$ANDROID_NDK"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
 
           NDK="$ANDROID_NDK"
           TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
@@ -31,15 +49,16 @@ jobs:
           test -d "$NDK"
           test -x "$TOOLCHAIN/bin/clang"
 
-          echo "=== NDK ==="
+          echo
+          echo "=== NDK VERSION ==="
           cat "$NDK/source.properties"
 
           echo
-          echo "=== CLANG ==="
+          echo "=== CLANG VERSION ==="
           "$TOOLCHAIN/bin/clang" --version
 
           echo
-          echo "=== ARM64 TARGET TEST ==="
+          echo "=== ARM64 ANDROID TARGET TEST ==="
 
           "$TOOLCHAIN/bin/clang" \
             --target=aarch64-linux-android29 \
@@ -51,31 +70,31 @@ jobs:
           echo
           echo "ARM64 Android compiler: OK"
 
+      # ------------------------------------------------------------
+      # Verify normal build tools.
+      # ------------------------------------------------------------
       - name: Check build tools
         run: |
           set -eux
 
+          echo "=== CMAKE ==="
           cmake --version
-          ninja --version
-          python3 --version
-          git --version
-          curl --version | head -1
 
-      - name: Verify our Android platform file
-        run: |
-          set -eux
-
-          PLATFORM_FILE="build_files/cmake/platform/platform_android.cmake"
-
-          echo "Checking:"
-          echo "$PLATFORM_FILE"
           echo
+          echo "=== NINJA ==="
+          ninja --version
 
-          test -f "$PLATFORM_FILE"
+          echo
+          echo "=== PYTHON ==="
+          python3 --version
 
-          echo "=== OUR ANDROID PLATFORM FILE ==="
-          cat "$PLATFORM_FILE"
+          echo
+          echo "=== GIT ==="
+          git --version
 
+      # ------------------------------------------------------------
+      # Download official Blender 5.2.2 source.
+      # ------------------------------------------------------------
       - name: Download Blender 5.2.2
         run: |
           set -eux
@@ -83,12 +102,15 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/src"
           cd "$GITHUB_WORKSPACE/src"
 
-          curl -L --fail --retry 3 \
+          curl -L \
+            --fail \
+            --retry 3 \
             "https://download.blender.org/source/blender-5.2.2.tar.xz" \
             -o blender-5.2.2.tar.xz
 
           test -f blender-5.2.2.tar.xz
 
+          echo
           echo "Downloaded:"
           ls -lh blender-5.2.2.tar.xz
 
@@ -100,6 +122,9 @@ jobs:
           echo "Blender source:"
           ls -la blender-5.2.2 | head -40
 
+      # ------------------------------------------------------------
+      # Copy OUR Android platform file into Blender's source tree.
+      # ------------------------------------------------------------
       - name: Install our Android platform file
         run: |
           set -eux
@@ -116,9 +141,14 @@ jobs:
 
           test -f "$DEST"
 
-          echo "Installed our Android platform file:"
+          echo "Android platform file installed:"
           echo "$DEST"
 
+      # ------------------------------------------------------------
+      # Patch ONLY the actual platform_unix.cmake include.
+      #
+      # We do not assume Blender's surrounding CMake structure.
+      # ------------------------------------------------------------
       - name: Patch Blender platform selection
         run: |
           set -eux
@@ -128,83 +158,70 @@ jobs:
 
           cp "$CMAKE_FILE" "$CMAKE_FILE.original"
 
-          python3 <<'PY'
+          python3 - "$CMAKE_FILE" <<'PY'
           from pathlib import Path
+          import sys
 
-          path = Path(
-              "/home/runner/work/"
-              + Path("/home/runner/work").glob("*").__next__().name
-              + "/"
-              + Path("/home/runner/work").glob("*").__next__().name
-              + "/src/blender-5.2.2/CMakeLists.txt"
-          )
-
+          path = Path(sys.argv[1])
           text = path.read_text()
 
-          marker = """# ----------------------------------------------------------------------------
-          # Main Platform Checks
-          #
-          # - UNIX
-          # - WIN32
-          # - APPLE
-          """
+          target = "include(build_files/cmake/platform/platform_unix.cmake)"
 
-          if marker not in text:
+          replacement = """if(ANDROID)
+            include(build_files/cmake/platform/platform_android.cmake)
+          else()
+            include(build_files/cmake/platform/platform_unix.cmake)
+          endif()"""
+
+          count = text.count(target)
+
+          print(f"Found platform_unix.cmake include count: {count}")
+
+          if count != 1:
               raise SystemExit(
-                  "Could not find Blender's Main Platform Checks section."
+                  f"Expected exactly 1 platform_unix.cmake include, found {count}"
               )
 
-          old = """if(UNIX AND NOT APPLE)
-          include(build_files/cmake/platform/platform_unix.cmake)
-          elseif(WIN32)
-          include(build_files/cmake/platform/platform_win32.cmake)
-          elseif(APPLE)
-          include(build_files/cmake/platform/platform_apple.cmake)
-          endif()
-          """
+          text = text.replace(target, replacement, 1)
 
-          new = """if(ANDROID)
-          include(build_files/cmake/platform/platform_android.cmake)
-          elseif(UNIX AND NOT APPLE)
-          include(build_files/cmake/platform/platform_unix.cmake)
-          elseif(WIN32)
-          include(build_files/cmake/platform/platform_win32.cmake)
-          elseif(APPLE)
-          include(build_files/cmake/platform/platform_apple.cmake)
-          endif()
-          """
+          path.write_text(text)
 
-          if old not in text:
-              raise SystemExit(
-                  "Could not find the expected platform-selection block."
-              )
-
-          path.write_text(text.replace(old, new, 1))
-
-          print("CMakeLists.txt patched successfully.")
+          print("Platform selection patched successfully.")
           PY
 
-      - name: Verify Blender Android source modifications
+      # ------------------------------------------------------------
+      # Verify the patch before trying CMake.
+      # ------------------------------------------------------------
+      - name: Verify Android platform integration
         run: |
           set -eux
 
           SOURCE="$GITHUB_WORKSPACE/src/blender-5.2.2"
 
-          echo "=== Android platform file ==="
-          test -f \
-            "$SOURCE/build_files/cmake/platform/platform_android.cmake"
-
-          grep -n \
-            "Configuring Blender for Android" \
+          echo "=== OUR ANDROID PLATFORM FILE ==="
+          cat \
             "$SOURCE/build_files/cmake/platform/platform_android.cmake"
 
           echo
-          echo "=== Android CMake selection ==="
+          echo "=== ANDROID SELECTION IN CMAKE ==="
 
-          grep -n -A8 -B3 \
+          grep -n -A8 -B4 \
             "platform_android.cmake" \
             "$SOURCE/CMakeLists.txt"
 
+          echo
+          echo "=== ORIGINAL PLATFORM INCLUDE COUNT ==="
+
+          grep -c \
+            "platform_unix.cmake" \
+            "$SOURCE/CMakeLists.txt"
+
+      # ------------------------------------------------------------
+      # Run CMake.
+      #
+      # This is still a PROBE.
+      # We expect more Android-specific blockers to appear.
+      # ------------------------------------------------------------
       - name: Configure Blender for Android
         continue-on-error: true
         run: |
@@ -218,6 +235,7 @@ jobs:
 
           cd "$BUILD"
 
+          echo
           echo "=========================================="
           echo " Blender 5.2.2 Android Configure"
           echo "=========================================="
@@ -236,8 +254,12 @@ jobs:
             -DWITH_VULKAN_BACKEND=ON \
             -DWITH_OPENGL_BACKEND=OFF \
             -DWITH_LIBS_PRECOMPILED=OFF \
-            "$SOURCE" 2>&1 | tee cmake-android.log
+            "$SOURCE" \
+            2>&1 | tee cmake-android.log
 
+      # ------------------------------------------------------------
+      # Show the important part of the result.
+      # ------------------------------------------------------------
       - name: Show configure result
         if: always()
         run: |
@@ -245,7 +267,7 @@ jobs:
 
           echo
           echo "=========================================="
-          echo " CONFIGURE RESULT"
+          echo " ANDROID CONFIGURE RESULT"
           echo "=========================================="
 
           if [ -f "$LOG" ]; then
@@ -258,7 +280,7 @@ jobs:
               "$LOG" || true
 
             echo
-            echo "=== IMPORTANT ERRORS ==="
+            echo "=== ERRORS ==="
 
             grep -n -E \
               "CMake Error|Could NOT find|NOTFOUND|not found|unsupported|Unsupported|error:" \
@@ -271,14 +293,17 @@ jobs:
             tail -250 "$LOG"
 
           else
-            echo "No CMake log was produced."
+            echo "CMake log was not produced."
           fi
 
-      - name: Upload configure diagnostics
+      # ------------------------------------------------------------
+      # Save logs/files so we can inspect them later.
+      # ------------------------------------------------------------
+      - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: blender-5.2.2-android-configure
+          name: blender-5.2.2-android-probe
           path: |
             build-android/cmake-android.log
             src/blender-5.2.2/CMakeLists.txt.original
