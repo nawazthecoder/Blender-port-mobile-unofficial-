@@ -14,6 +14,7 @@ jobs:
       ANDROID_ABI: "arm64-v8a"
 
     steps:
+
       # ============================================================
       # CHECKOUT
       # ============================================================
@@ -21,11 +22,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+
       # ============================================================
       # RUNNER INFORMATION
       # ============================================================
 
       - name: Show runner environment
+        shell: bash
         run: |
           set -eux
 
@@ -33,6 +36,8 @@ jobs:
           echo " LLVM Android Bootstrap"
           echo "=========================================="
 
+          echo
+          echo "Kernel:"
           uname -a
 
           echo
@@ -47,6 +52,7 @@ jobs:
           echo "Disk:"
           df -h /
 
+
       # ============================================================
       # JAVA
       # ============================================================
@@ -57,47 +63,70 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+
       # ============================================================
       # ANDROID SDK
+      #
+      # v4 is important here.
+      # It no longer requests the obsolete "tools" package.
+      #
+      # We use packages: '' because we install exactly the SDK
+      # components we need ourselves in the next step.
       # ============================================================
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ""
 
-      - name: Install Android NDK
+
+      # ============================================================
+      # ANDROID SDK / NDK
+      # ============================================================
+
+      - name: Install Android platform and NDK
         shell: bash
         run: |
           set -eux
 
           echo "=========================================="
-          echo " Installing Android NDK"
+          echo " Installing Android SDK Components"
           echo "=========================================="
 
-          sdkmanager --install \
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+
+          if [ -z "$SDK_ROOT" ]; then
+            echo "ERROR: Android SDK root was not provided."
+            exit 1
+          fi
+
+          echo
+          echo "Android SDK root:"
+          echo "$SDK_ROOT"
+
+          sdkmanager \
+            --sdk_root="$SDK_ROOT" \
             "platform-tools" \
             "platforms;android-${ANDROID_API}" \
             "ndk;${ANDROID_NDK_VERSION}"
 
-          SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
           NDK="$SDK_ROOT/ndk/${ANDROID_NDK_VERSION}"
 
           if [ ! -d "$NDK" ]; then
+            echo
             echo "ERROR: Android NDK was not installed:"
             echo "$NDK"
             exit 1
           fi
 
+          echo
+          echo "Android NDK:"
+          echo "$NDK"
+
           echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$NDK" >> "$GITHUB_ENV"
           echo "ANDROID_NDK=$NDK" >> "$GITHUB_ENV"
 
-          echo
-          echo "Android SDK:"
-          echo "$SDK_ROOT"
-
-          echo
-          echo "Android NDK:"
-          echo "$NDK"
 
       # ============================================================
       # VERIFY ANDROID TOOLCHAIN
@@ -109,7 +138,7 @@ jobs:
           set -eux
 
           echo "=========================================="
-          echo " Android Toolchain Check"
+          echo " Android Toolchain Verification"
           echo "=========================================="
 
           test -d "$ANDROID_NDK_ROOT"
@@ -123,7 +152,7 @@ jobs:
           test -x "$TOOLCHAIN_BIN/clang++"
 
           echo
-          echo "NDK:"
+          echo "NDK version:"
           cat "$ANDROID_NDK_ROOT/source.properties"
 
           echo
@@ -135,22 +164,31 @@ jobs:
           "$TOOLCHAIN_BIN/clang++" --version
 
           echo
-          echo "Android target compiler test:"
+          echo "Testing Android target compiler..."
 
           "$TOOLCHAIN_BIN/clang" \
             --target=aarch64-linux-android${ANDROID_API} \
             -c \
             -x c \
             /dev/null \
-            -o /tmp/android-test.o
+            -o /tmp/android-arm64-test.o
 
-          test -f /tmp/android-test.o
+          test -f /tmp/android-arm64-test.o
 
           echo
-          echo "Android ARM64 compiler invocation works."
+          echo "Android ARM64 compiler test: PASSED"
+
+          echo
+          echo "Android API:"
+          echo "$ANDROID_API"
+
+          echo
+          echo "Android ABI:"
+          echo "$ANDROID_ABI"
+
 
       # ============================================================
-      # DOWNLOAD LLVM
+      # DOWNLOAD LLVM 20.1.8
       # ============================================================
 
       - name: Download LLVM 20.1.8
@@ -177,6 +215,7 @@ jobs:
           test -s "$LLVM_ARCHIVE"
 
           rm -rf llvm-source
+
           mkdir -p llvm-source
 
           tar \
@@ -188,18 +227,18 @@ jobs:
           test -f llvm-source/clang/CMakeLists.txt
 
           echo
-          echo "LLVM source:"
-          echo "$GITHUB_WORKSPACE/llvm-source"
+          echo "LLVM source prepared successfully."
+
 
       # ============================================================
-      # HOST TABLEGEN
+      # HOST TABLEGEN CONFIGURATION
       #
-      # These executables run on Ubuntu x86_64.
+      # These executables run on the Ubuntu x86_64 runner.
       #
       # They are NOT Android binaries.
       # ============================================================
 
-      - name: Configure host LLVM TableGen tools
+      - name: Configure host LLVM TableGen
         shell: bash
         run: |
           set -eux
@@ -208,10 +247,11 @@ jobs:
           BUILD="$GITHUB_WORKSPACE/llvm-host-build"
 
           rm -rf "$BUILD"
+
           mkdir -p "$BUILD"
 
           echo "=========================================="
-          echo " Configuring HOST TableGen"
+          echo " Configuring HOST LLVM TableGen"
           echo "=========================================="
 
           cmake \
@@ -221,6 +261,10 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DLLVM_ENABLE_PROJECTS="clang" \
             -DLLVM_TARGETS_TO_BUILD="X86" \
+            -DLLVM_BUILD_TOOLS=ON \
+            -DLLVM_INCLUDE_TOOLS=ON \
+            -DLLVM_BUILD_UTILS=ON \
+            -DLLVM_INCLUDE_UTILS=ON \
             -DLLVM_INCLUDE_TESTS=OFF \
             -DLLVM_BUILD_TESTS=OFF \
             -DLLVM_INCLUDE_EXAMPLES=OFF \
@@ -236,7 +280,12 @@ jobs:
             -DLLVM_ENABLE_RTTI=ON \
             -DLLVM_ENABLE_EH=ON
 
-      - name: Build host TableGen tools
+
+      # ============================================================
+      # BUILD HOST TABLEGEN
+      # ============================================================
+
+      - name: Build host LLVM TableGen
         shell: bash
         run: |
           set -u
@@ -246,7 +295,7 @@ jobs:
           LOG="$GITHUB_WORKSPACE/llvm-host-build.log"
 
           echo "=========================================="
-          echo " Building HOST TableGen tools"
+          echo " Building HOST TableGen"
           echo "=========================================="
 
           set +e
@@ -262,6 +311,7 @@ jobs:
           set -e
 
           if [ "$STATUS" -ne 0 ]; then
+
             echo
             echo "=========================================="
             echo " HOST TABLEGEN BUILD FAILED"
@@ -281,10 +331,12 @@ jobs:
             tail -150 "$LOG"
 
             exit "$STATUS"
+
           fi
 
           echo
-          echo "Host TableGen tools built successfully."
+          echo "Host TableGen build completed successfully."
+
 
       # ============================================================
       # LOCATE HOST TABLEGEN
@@ -347,15 +399,14 @@ jobs:
           echo "$CLANG_TBLGEN"
 
           echo
+          echo "Versions:"
           "$LLVM_TBLGEN" --version
-
-          echo
           "$CLANG_TBLGEN" --version
 
-          echo
           echo "LLVM_NATIVE_TOOL_DIR=$HOST_TOOL_DIR" >> "$GITHUB_ENV"
           echo "LLVM_TABLEGEN=$LLVM_TBLGEN" >> "$GITHUB_ENV"
           echo "CLANG_TABLEGEN=$CLANG_TBLGEN" >> "$GITHUB_ENV"
+
 
       # ============================================================
       # CONFIGURE LLVM FOR ANDROID ARM64
@@ -384,24 +435,24 @@ jobs:
           echo "=========================================="
 
           echo
-          echo "Source:"
+          echo "LLVM source:"
           echo "$SOURCE"
 
           echo
-          echo "Build:"
+          echo "LLVM build:"
           echo "$BUILD"
 
           echo
-          echo "Install:"
+          echo "LLVM install:"
           echo "$INSTALL"
-
-          echo
-          echo "Host TableGen:"
-          echo "$LLVM_NATIVE_TOOL_DIR"
 
           echo
           echo "Android NDK:"
           echo "$ANDROID_NDK_ROOT"
+
+          echo
+          echo "Host TableGen:"
+          echo "$LLVM_NATIVE_TOOL_DIR"
 
           cmake \
             -S "$SOURCE" \
@@ -425,12 +476,12 @@ jobs:
             -DLLVM_TABLEGEN="$LLVM_TABLEGEN" \
             -DCLANG_TABLEGEN="$CLANG_TABLEGEN" \
             -DLLVM_USE_HOST_TOOLS=ON \
-            -DLLVM_INCLUDE_TESTS=OFF \
-            -DLLVM_BUILD_TESTS=OFF \
-            -LLVM_BUILD_TOOLS=OFF \
+            -DLLVM_BUILD_TOOLS=OFF \
             -DLLVM_INCLUDE_TOOLS=OFF \
             -DLLVM_BUILD_UTILS=OFF \
             -DLLVM_INCLUDE_UTILS=OFF \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_BUILD_TESTS=OFF \
             -DLLVM_INCLUDE_EXAMPLES=OFF \
             -DLLVM_BUILD_EXAMPLES=OFF \
             -DLLVM_INCLUDE_BENCHMARKS=OFF \
@@ -446,8 +497,10 @@ jobs:
             -DLLVM_ENABLE_UNWIND_TABLES=ON \
             -DLLVM_BUILD_LLVM_DYLIB=ON \
             -DLLVM_LINK_LLVM_DYLIB=ON \
+            -DCLANG_LINK_CLANG_DYLIB=ON \
             -DCLANG_INCLUDE_TESTS=OFF \
             -DCLANG_INCLUDE_DOCS=OFF
+
 
       # ============================================================
       # BUILD ANDROID LLVM
@@ -479,6 +532,7 @@ jobs:
           set -e
 
           if [ "$STATUS" -ne 0 ]; then
+
             echo
             echo "=========================================="
             echo " ANDROID LLVM BUILD FAILED"
@@ -498,13 +552,15 @@ jobs:
             tail -150 "$LOG"
 
             exit "$STATUS"
+
           fi
 
           echo
           echo "Android LLVM build completed successfully."
 
+
       # ============================================================
-      # INSTALL
+      # INSTALL ANDROID LLVM
       # ============================================================
 
       - name: Install Android LLVM
@@ -533,21 +589,27 @@ jobs:
           set -e
 
           if [ "$STATUS" -ne 0 ]; then
+
             echo
             echo "=========================================="
             echo " LLVM INSTALL FAILED"
             echo "=========================================="
 
+            echo
+            echo "========== INSTALL OUTPUT =========="
+
             cat "$LOG"
 
             exit "$STATUS"
+
           fi
 
           echo
           echo "Android LLVM installation completed."
 
+
       # ============================================================
-      # VERIFY LLVM ARM64
+      # VERIFY ARM64 LIBRARIES
       # ============================================================
 
       - name: Verify Android LLVM ARM64
@@ -565,7 +627,7 @@ jobs:
           test -d "$INSTALL/lib"
 
           echo
-          echo "Installed LLVM libraries:"
+          echo "Installed LLVM/Clang libraries:"
 
           find "$INSTALL/lib" \
             -maxdepth 1 \
@@ -610,10 +672,68 @@ jobs:
             "Class:|Machine:|Type:"
 
           echo
-          echo "Checking ARM64 architecture..."
+          echo "Checking for AArch64..."
 
           file "$LLVM_LIB" | grep -Ei \
             "aarch64|ARM aarch64"
+
+          echo
+          echo "Android LLVM architecture verification: PASSED"
+
+
+      # ============================================================
+      # VERIFY CLANG
+      # ============================================================
+
+      - name: Verify Android Clang libraries
+        shell: bash
+        run: |
+          set -eux
+
+          INSTALL="$GITHUB_WORKSPACE/llvm-android-install"
+
+          echo "=========================================="
+          echo " Verifying Android Clang"
+          echo "=========================================="
+
+          CLANG_LIB="$(
+            find "$INSTALL/lib" \
+              -maxdepth 1 \
+              -type f \
+              \( \
+                -name "libclang-cpp*.so*" \
+                -o -name "libclang-cpp*.a" \
+                -o -name "libclang*.so*" \
+                -o -name "libclang*.a" \
+              \) \
+              -print \
+              -quit
+          )"
+
+          if [ -z "$CLANG_LIB" ]; then
+            echo "ERROR: No Clang library was installed."
+            exit 1
+          fi
+
+          echo
+          echo "Selected Clang library:"
+          echo "$CLANG_LIB"
+
+          echo
+          echo "File information:"
+          file "$CLANG_LIB"
+
+          echo
+          echo "ELF information:"
+          readelf -h "$CLANG_LIB" | grep -E \
+            "Class:|Machine:|Type:"
+
+          file "$CLANG_LIB" | grep -Ei \
+            "aarch64|ARM aarch64"
+
+          echo
+          echo "Android Clang architecture verification: PASSED"
+
 
       # ============================================================
       # VERIFY LLVM / CLANG CMAKE PACKAGES
@@ -627,7 +747,7 @@ jobs:
           INSTALL="$GITHUB_WORKSPACE/llvm-android-install"
 
           echo "=========================================="
-          echo " LLVM CMake Package Check"
+          echo " LLVM / Clang CMake Package Check"
           echo "=========================================="
 
           LLVM_CONFIG="$(
@@ -674,11 +794,9 @@ jobs:
             echo "ANDROID_CLANG_CONFIG=$CLANG_CONFIG"
           } >> "$GITHUB_ENV"
 
+
       # ============================================================
       # ANDROID ARM64 SMOKE TEST
-      #
-      # Uses NDK clang directly with --target rather than assuming
-      # a versioned clang wrapper exists.
       # ============================================================
 
       - name: Android ARM64 compiler smoke test
@@ -728,11 +846,13 @@ jobs:
 
           echo
           echo "Architecture:"
+
           file "$TESTDIR/test-arm64" | grep -Ei \
             "aarch64|ARM aarch64"
 
           echo
-          echo "Android ARM64 compiler smoke test passed."
+          echo "Android ARM64 compiler smoke test: PASSED"
+
 
       # ============================================================
       # SAVE DIAGNOSTICS
@@ -753,6 +873,7 @@ jobs:
             android-llvm-smoke
           if-no-files-found: warn
 
+
       # ============================================================
       # SUCCESS
       # ============================================================
@@ -768,11 +889,14 @@ jobs:
           echo "Android ABI: ${ANDROID_ABI}"
           echo "Android API: ${ANDROID_API}"
           echo
+          echo "Android SDK setup: PASSED"
+          echo "Android NDK setup: PASSED"
           echo "Host llvm-tblgen: BUILT"
           echo "Host clang-tblgen: BUILT"
           echo "LLVM ARM64: BUILT"
           echo "Clang ARM64: BUILT"
           echo "LLVM ARM64 architecture: VERIFIED"
+          echo "Clang ARM64 architecture: VERIFIED"
           echo "LLVM CMake package: VERIFIED"
           echo "Clang CMake package: VERIFIED"
           echo "Android ARM64 compiler smoke test: PASSED"
