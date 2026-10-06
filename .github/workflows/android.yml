@@ -10,60 +10,180 @@ jobs:
     steps:
       - name: Show runner
         run: |
+          echo "=== System ==="
           uname -a
-          echo "CPU: $(nproc)"
-          free -h
-          df -h /
+          echo
 
-      - name: Check Android toolchain
+          echo "=== CPU ==="
+          nproc
+          echo
+
+          echo "=== Memory ==="
+          free -h
+          echo
+
+          echo "=== Disk ==="
+          df -h /
+          echo
+
+      - name: Show Android environment
         run: |
+          echo "=== Android SDK/NDK ==="
           echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
           echo "ANDROID_NDK=$ANDROID_NDK"
           echo "ANDROID_NDK_LATEST_HOME=$ANDROID_NDK_LATEST_HOME"
+          echo
 
-          "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++" \
-            --version
+          if [ -n "$ANDROID_NDK" ] && [ -d "$ANDROID_NDK" ]; then
+            echo "ANDROID_NDK exists:"
+            ls -ld "$ANDROID_NDK"
+          else
+            echo "ANDROID_NDK is not available"
+            exit 1
+          fi
+
+      - name: Check Android NDK
+        run: |
+          NDK="${ANDROID_NDK}"
+
+          echo "Using NDK:"
+          echo "$NDK"
+          echo
+
+          test -d "$NDK"
+
+          echo "NDK version:"
+          cat "$NDK/source.properties"
+          echo
+
+          echo "LLVM directory:"
+          ls -la "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin" | head -30
+
+      - name: Check ARM64 Android compiler
+        run: |
+          NDK="${ANDROID_NDK}"
+          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
+
+          echo "Using toolchain:"
+          echo "$TOOLCHAIN"
+          echo
+
+          test -x "$TOOLCHAIN/bin/clang"
+
+          echo "Clang version:"
+          "$TOOLCHAIN/bin/clang" --version
+          echo
+
+          echo "Testing ARM64 Android target:"
+          "$TOOLCHAIN/bin/clang" \
+            --target=aarch64-linux-android29 \
+            -### \
+            -x c \
+            -c /dev/null \
+            -o /tmp/test.o
+
+          echo
+          echo "ARM64 Android Clang: OK"
+
+      - name: Check build tools
+        run: |
+          echo "=== CMake ==="
+          cmake --version
+          echo
+
+          echo "=== Ninja ==="
+          ninja --version
+          echo
+
+          echo "=== Python ==="
+          python3 --version
+          echo
+
+          echo "=== Git ==="
+          git --version
+          echo
+
+          echo "=== Curl ==="
+          curl --version | head -1
 
       - name: Download Blender 5.2.2 source
         run: |
           mkdir -p "$GITHUB_WORKSPACE/src"
           cd "$GITHUB_WORKSPACE/src"
 
-          curl -L --fail \
-            https://download.blender.org/source/blender-5.2.2.tar.xz \
+          echo "Downloading Blender 5.2.2..."
+
+          curl -L --fail --retry 3 \
+            "https://download.blender.org/source/blender-5.2.2.tar.xz" \
             -o blender-5.2.2.tar.xz
+
+          echo
+          echo "Downloaded file:"
+          ls -lh blender-5.2.2.tar.xz
+
+          echo
+          echo "Extracting Blender..."
 
           tar -xf blender-5.2.2.tar.xz
 
           test -d blender-5.2.2
-          echo "Blender source:"
-          ls -la blender-5.2.2
+
+          echo
+          echo "Blender source directory:"
+          ls -la blender-5.2.2 | head -30
 
       - name: Verify Blender source
         run: |
-          cd "$GITHUB_WORKSPACE/src/blender-5.2.2"
+          SOURCE="$GITHUB_WORKSPACE/src/blender-5.2.2"
 
-          grep -n "BLENDER_VERSION" \
-            source/blender/blenkernel/BKE_blender_version.hh | head -5 || true
+          test -d "$SOURCE"
 
-          cmake --version
-          ninja --version
-          python3 --version
+          echo "Blender source found:"
+          echo "$SOURCE"
+          echo
 
-      - name: Check ARM64 Android compiler
+          echo "Top-level files:"
+          ls -la "$SOURCE" | head -40
+          echo
+
+          echo "Git revision information:"
+          if [ -f "$SOURCE/release/VERSION" ]; then
+            cat "$SOURCE/release/VERSION"
+          else
+            echo "VERSION file not found in expected location"
+          fi
+
+      - name: Check Android platform state
         run: |
-          NDK="$ANDROID_NDK_LATEST_HOME"
-          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          SOURCE="$GITHUB_WORKSPACE/src/blender-5.2.2"
 
-          "$TOOLCHAIN/aarch64-linux-android-clang" \
-            --target=aarch64-linux-android \
-            --version
+          echo "Checking Blender's existing platform/build structure..."
+          echo
+
+          echo "CMake directories:"
+          find "$SOURCE/build_files/cmake" -maxdepth 2 -type d | head -40
+
+          echo
+          echo "Platform-related files:"
+          find "$SOURCE/build_files/cmake" -type f \
+            \( -iname '*platform*' -o -iname '*android*' \) \
+            | head -80
 
       - name: Bootstrap complete
         run: |
+          echo
           echo "=========================================="
-          echo "Blender 5.2.2 source: OK"
-          echo "Android NDK: OK"
-          echo "ARM64 compiler: OK"
-          echo "Next stage: Android CMake platform"
+          echo " Blender 5.2.2 Android Bootstrap"
+          echo "=========================================="
+          echo
+          echo "Blender source:       OK"
+          echo "Android NDK:          OK"
+          echo "ARM64 Clang:          OK"
+          echo "CMake:                OK"
+          echo "Ninja:                OK"
+          echo
+          echo "Next stage:"
+          echo "Android platform implementation"
           echo "=========================================="
