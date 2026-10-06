@@ -17,13 +17,16 @@ jobs:
 
           echo "=== SYSTEM ==="
           uname -a
-          echo "CPU: $(nproc)"
-          echo
 
+          echo
+          echo "=== CPU ==="
+          nproc
+
+          echo
           echo "=== MEMORY ==="
           free -h
-          echo
 
+          echo
           echo "=== DISK ==="
           df -h /
 
@@ -33,7 +36,7 @@ jobs:
 
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_NDK=$ANDROID_NDK"
-          echo
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
 
           NDK="$ANDROID_NDK"
           TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
@@ -41,15 +44,16 @@ jobs:
           test -d "$NDK"
           test -x "$TOOLCHAIN/bin/clang"
 
+          echo
           echo "=== NDK VERSION ==="
           cat "$NDK/source.properties"
 
           echo
-          echo "=== CLANG ==="
+          echo "=== CLANG VERSION ==="
           "$TOOLCHAIN/bin/clang" --version
 
           echo
-          echo "=== ARM64 ANDROID TARGET ==="
+          echo "=== ARM64 TARGET TEST ==="
 
           "$TOOLCHAIN/bin/clang" \
             --target=aarch64-linux-android29 \
@@ -67,12 +71,23 @@ jobs:
 
           java -version
 
+      - name: Check build tools
+        run: |
+          set -eux
+
+          cmake --version
+          ninja --version
+          python3 --version
+          git --version
+          curl --version | head -1
+
       - name: Determine Blender Python version
         run: |
           set -eux
 
-          mkdir -p "$GITHUB_WORKSPACE/src"
-          cd "$GITHUB_WORKSPACE/src"
+          mkdir -p "$GITHUB_WORKSPACE/blender-source"
+
+          cd "$GITHUB_WORKSPACE/blender-source"
 
           curl -L \
             --fail \
@@ -82,12 +97,16 @@ jobs:
 
           tar -xf blender-5.2.2.tar.xz
 
-          SOURCE="$GITHUB_WORKSPACE/src/blender-5.2.2"
+          SOURCE="$GITHUB_WORKSPACE/blender-source/blender-5.2.2"
 
-          echo "Searching Blender 5.2.2 for Python version..."
+          test -d "$SOURCE"
+
+          echo "Blender source located at:"
+          echo "$SOURCE"
 
           PYTHON_VERSION="$(
-            sed -n 's/^set(PYTHON_VERSION \([0-9.]*\)).*/\1/p' \
+            sed -n \
+              's/^set(PYTHON_VERSION[[:space:]]*\([0-9.]*\)).*/\1/p' \
               "$SOURCE/build_files/build_environment/cmake/versions.cmake" \
               | head -1
           )"
@@ -97,55 +116,55 @@ jobs:
             exit 1
           fi
 
-          echo "Blender requires Python: $PYTHON_VERSION"
+          echo
+          echo "Blender Python version:"
+          echo "$PYTHON_VERSION"
 
           echo "PYTHON_VERSION=$PYTHON_VERSION" >> "$GITHUB_ENV"
 
-      - name: Download matching CPython source
+      - name: Clone CPython source
         run: |
           set -eux
 
           cd "$GITHUB_WORKSPACE"
 
-          PYTHON_FILE="Python-${PYTHON_VERSION}.tar.xz"
-          PYTHON_URL="https://www.python.org/ftp/python/${PYTHON_VERSION}/${PYTHON_FILE}"
+          rm -rf cpython
 
-          echo "Downloading:"
-          echo "$PYTHON_URL"
+          git clone \
+            --depth 1 \
+            --branch "v${PYTHON_VERSION}" \
+            https://github.com/python/cpython.git \
+            cpython
 
-          curl -L \
-            --fail \
-            --retry 3 \
-            "$PYTHON_URL" \
-            -o "$PYTHON_FILE"
-
-          test -f "$PYTHON_FILE"
-
-          mkdir -p cpython
-
-          tar -xf "$PYTHON_FILE" \
-            -C cpython \
-            --strip-components=1
-
-          test -f cpython/Platforms/Android/README.md
+          cd cpython
 
           echo
-          echo "CPython source:"
-          ls -la cpython | head -40
+          echo "=== CPYTHON VERSION ==="
+          git describe --tags --always
 
-      - name: Check CPython Android build system
+          echo
+          echo "=== ANDROID SOURCE ==="
+
+          test -f Platforms/Android/README.md
+          test -f Platforms/Android/__main__.py
+
+          echo "Platforms/Android found."
+
+      - name: Inspect CPython Android build system
         run: |
           set -eux
 
           cd "$GITHUB_WORKSPACE/cpython"
 
-          echo "=== CPython Android files ==="
-
+          echo "=== Platforms/Android ==="
           ls -la Platforms/Android
 
           echo
-          echo "=== Android build help ==="
+          echo "=== BUILD HELP ==="
+          python3 Platforms/Android build --help
 
+          echo
+          echo "=== HOST HELP ==="
           python3 Platforms/Android configure-host --help
 
       - name: Build CPython for Android ARM64
@@ -157,8 +176,8 @@ jobs:
           HOST="aarch64-linux-android"
 
           echo "=========================================="
-          echo " Building CPython ${PYTHON_VERSION}"
-          echo " Target: ${HOST}"
+          echo " Building CPython $PYTHON_VERSION"
+          echo " Target: $HOST"
           echo "=========================================="
 
           python3 Platforms/Android build "$HOST"
@@ -168,25 +187,19 @@ jobs:
           set -eux
 
           PYTHON_DIR="$GITHUB_WORKSPACE/cpython/cross-build/aarch64-linux-android"
+          PREFIX="$PYTHON_DIR/prefix"
 
-          echo "Looking for Android Python at:"
+          echo "Android Python directory:"
           echo "$PYTHON_DIR"
 
           test -d "$PYTHON_DIR"
+          test -d "$PREFIX"
 
           echo
-          echo "=== PREFIX ==="
-          find "$PYTHON_DIR/prefix" -maxdepth 2 -type d | head -50
-
-          echo
-          echo "=== PYTHON HEADERS ==="
-
-          find "$PYTHON_DIR/prefix" \
-            -name Python.h \
-            -print
+          echo "=== PYTHON.H ==="
 
           PYTHON_HEADER="$(
-            find "$PYTHON_DIR/prefix" \
+            find "$PREFIX" \
               -name Python.h \
               -print \
               | head -1
@@ -197,50 +210,70 @@ jobs:
             exit 1
           fi
 
-          echo
-          echo "Python.h found:"
+          echo "FOUND:"
           echo "$PYTHON_HEADER"
 
           echo
-          echo "=== PYTHON LIBRARIES ==="
-
-          find "$PYTHON_DIR/prefix/lib" \
-            -maxdepth 1 \
-            -type f \
-            | sort || true
+          echo "=== PYTHON LIBRARY ==="
 
           PYTHON_LIBRARY="$(
-            find "$PYTHON_DIR/prefix/lib" \
-              -maxdepth 1 \
+            find "$PREFIX" \
               -type f \
-              \( -name 'libpython*.so' -o -name 'libpython*.a' \) \
+              \( \
+                -name 'libpython*.so' \
+                -o \
+                -name 'libpython*.a' \
+              \) \
               -print \
               | head -1
           )"
 
           if [ -z "$PYTHON_LIBRARY" ]; then
-            echo "ERROR: No libpython library was produced."
+            echo "ERROR: libpython was not produced."
             exit 1
           fi
 
-          echo
-          echo "Python library found:"
+          echo "FOUND:"
           echo "$PYTHON_LIBRARY"
 
           echo
-          echo "=== PYTHON PREFIX ==="
-          du -sh "$PYTHON_DIR/prefix"
+          echo "=== PREFIX SIZE ==="
+          du -sh "$PREFIX"
 
-      - name: Save Android Python
+          echo
+          echo "=== PREFIX CONTENTS ==="
+          find "$PREFIX" -maxdepth 2 -type d | head -80
+
+      - name: Package Android Python
+        if: success()
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE/cpython"
+
+          python3 Platforms/Android package aarch64-linux-android
+
+          echo
+          echo "=== DISTRIBUTION ==="
+
+          find \
+            "$GITHUB_WORKSPACE/cpython/cross-build/aarch64-linux-android/dist" \
+            -maxdepth 2 \
+            -type f \
+            -print \
+            | head -100
+
+      - name: Upload Android Python
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: python-${{ env.PYTHON_VERSION }}-android-arm64
           path: |
             cpython/cross-build/aarch64-linux-android/prefix
+            cpython/cross-build/aarch64-linux-android/dist
           if-no-files-found: error
 
-      - name: Bootstrap complete
+      - name: Python bootstrap complete
         if: success()
         run: |
           echo
@@ -248,10 +281,10 @@ jobs:
           echo " Android Python Bootstrap Complete"
           echo "=========================================="
           echo
-          echo "Blender Python version: $PYTHON_VERSION"
-          echo "Android target:        aarch64-linux-android"
-          echo "Python.h:              FOUND"
-          echo "libpython:             FOUND"
+          echo "Python version:       $PYTHON_VERSION"
+          echo "Target:               aarch64-linux-android"
+          echo "Python.h:             FOUND"
+          echo "libpython:            FOUND"
           echo
           echo "Next stage:"
           echo "Connect Android Python to Blender 5.2.2"
