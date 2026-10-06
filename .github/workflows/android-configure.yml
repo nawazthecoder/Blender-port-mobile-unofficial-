@@ -1,0 +1,460 @@
+name: Blender 5.2.2 Android - Configure
+
+on:
+  workflow_dispatch:
+
+jobs:
+  android-configure:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout our repository
+        uses: actions/checkout@v4
+
+      - name: Show environment
+        run: |
+          set -eux
+
+          echo "=== SYSTEM ==="
+          uname -a
+          echo "CPU: $(nproc)"
+
+          echo
+          echo "=== MEMORY ==="
+          free -h
+
+          echo
+          echo "=== DISK ==="
+          df -h /
+
+      - name: Check Android NDK
+        run: |
+          set -eux
+
+          NDK="$ANDROID_NDK"
+          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
+
+          test -d "$NDK"
+          test -x "$TOOLCHAIN/bin/clang"
+
+          echo "=== NDK ==="
+          cat "$NDK/source.properties"
+
+          echo
+          echo "=== CLANG ==="
+          "$TOOLCHAIN/bin/clang" --version
+
+          echo
+          echo "Android ARM64 compiler: OK"
+
+      - name: Check build tools
+        run: |
+          set -eux
+
+          cmake --version
+          ninja --version
+          python3 --version
+          git --version
+
+      # ------------------------------------------------------------
+      # Download Blender 5.2.2
+      # ------------------------------------------------------------
+
+      - name: Download Blender 5.2.2
+        run: |
+          set -eux
+
+          mkdir -p "$GITHUB_WORKSPACE/blender-source"
+
+          cd "$GITHUB_WORKSPACE/blender-source"
+
+          curl -L \
+            --fail \
+            --retry 3 \
+            "https://download.blender.org/source/blender-5.2.2.tar.xz" \
+            -o blender-5.2.2.tar.xz
+
+          test -f blender-5.2.2.tar.xz
+
+          tar -xf blender-5.2.2.tar.xz
+
+          test -d blender-5.2.2
+
+          echo "Blender 5.2.2 source: OK"
+
+      # ------------------------------------------------------------
+      # Determine Blender's exact Python version.
+      # ------------------------------------------------------------
+
+      - name: Determine Blender Python version
+        run: |
+          set -eux
+
+          SOURCE="$GITHUB_WORKSPACE/blender-source/blender-5.2.2"
+
+          PYTHON_VERSION="$(
+            sed -n \
+              's/^set(PYTHON_VERSION[[:space:]]*\([0-9.]*\)).*/\1/p' \
+              "$SOURCE/build_files/build_environment/cmake/versions.cmake" \
+              | head -1
+          )"
+
+          test -n "$PYTHON_VERSION"
+
+          echo "Blender Python: $PYTHON_VERSION"
+
+          echo "PYTHON_VERSION=$PYTHON_VERSION" >> "$GITHUB_ENV"
+
+      # ------------------------------------------------------------
+      # Build CPython 3.13 for the Android target.
+      # ------------------------------------------------------------
+
+      - name: Clone CPython
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE"
+
+          rm -rf cpython
+
+          git clone \
+            --depth 1 \
+            --branch "v${PYTHON_VERSION}" \
+            https://github.com/python/cpython.git \
+            cpython
+
+          cd cpython
+
+          git describe --tags --always
+
+          test -f Android/android.py
+          test -f Android/README.md
+
+          echo "CPython Android source: OK"
+
+      - name: CPython configure-build
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE/cpython"
+
+          python3 Android/android.py configure-build
+
+          test -d cross-build/build
+
+      - name: CPython make-build
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE/cpython"
+
+          python3 Android/android.py make-build
+
+          test -x cross-build/build/python
+
+          cross-build/build/python --version
+
+      - name: CPython configure-host
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE/cpython"
+
+          python3 Android/android.py \
+            configure-host \
+            aarch64-linux-android
+
+          test -d cross-build/aarch64-linux-android
+
+      - name: CPython make-host
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE/cpython"
+
+          python3 Android/android.py \
+            make-host \
+            aarch64-linux-android
+
+      # ------------------------------------------------------------
+      # Locate the Android Python prefix.
+      # ------------------------------------------------------------
+
+      - name: Locate Android Python
+        run: |
+          set -eux
+
+          PREFIX="$GITHUB_WORKSPACE/cpython/cross-build/aarch64-linux-android/prefix"
+
+          test -d "$PREFIX"
+
+          echo "ANDROID_PYTHON_PREFIX=$PREFIX" >> "$GITHUB_ENV"
+
+          echo
+          echo "=== PYTHON.H ==="
+
+          PYTHON_HEADER="$(
+            find "$PREFIX" \
+              -name Python.h \
+              -print \
+              | head -1
+          )"
+
+          test -n "$PYTHON_HEADER"
+
+          PYTHON_INCLUDE_DIR="$(dirname "$PYTHON_HEADER")"
+
+          echo "Python.h:"
+          echo "$PYTHON_HEADER"
+
+          echo
+          echo "Include directory:"
+          echo "$PYTHON_INCLUDE_DIR"
+
+          echo "PYTHON_INCLUDE_DIR=$PYTHON_INCLUDE_DIR" >> "$GITHUB_ENV"
+
+          echo
+          echo "=== PYCONFIG.H ==="
+
+          PYCONFIG_HEADER="$(
+            find "$PREFIX" \
+              -name pyconfig.h \
+              -print \
+              | head -1
+          )"
+
+          test -n "$PYCONFIG_HEADER"
+
+          PYTHON_INCLUDE_CONFIG_DIR="$(dirname "$PYCONFIG_HEADER")"
+
+          echo "pyconfig.h:"
+          echo "$PYCONFIG_HEADER"
+
+          echo "PYTHON_INCLUDE_CONFIG_DIR=$PYTHON_INCLUDE_CONFIG_DIR" >> "$GITHUB_ENV"
+
+          echo
+          echo "=== LIBPYTHON ==="
+
+          PYTHON_LIBRARY="$(
+            find "$PREFIX" \
+              -type f \
+              \( \
+                -name 'libpython*.so' \
+                -o \
+                -name 'libpython*.a' \
+              \) \
+              -print \
+              | head -1
+          )"
+
+          test -n "$PYTHON_LIBRARY"
+
+          echo "Python library:"
+          echo "$PYTHON_LIBRARY"
+
+          echo "PYTHON_LIBRARY=$PYTHON_LIBRARY" >> "$GITHUB_ENV"
+
+          echo
+          echo "=== PYTHON LIBPATH ==="
+
+          PYTHON_LIBPATH="$(dirname "$PYTHON_LIBRARY")"
+
+          echo "Python library path:"
+          echo "$PYTHON_LIBPATH"
+
+          echo "PYTHON_LIBPATH=$PYTHON_LIBPATH" >> "$GITHUB_ENV"
+
+      # ------------------------------------------------------------
+      # Copy our Android platform file into Blender.
+      # ------------------------------------------------------------
+
+      - name: Install our Android platform file
+        run: |
+          set -eux
+
+          SOURCE="$GITHUB_WORKSPACE/blender-source/blender-5.2.2"
+
+          OUR_FILE="$GITHUB_WORKSPACE/build_files/cmake/platform/platform_android.cmake"
+
+          DEST="$SOURCE/build_files/cmake/platform/platform_android.cmake"
+
+          test -f "$OUR_FILE"
+
+          mkdir -p "$SOURCE/build_files/cmake/platform"
+
+          cp "$OUR_FILE" "$DEST"
+
+          test -f "$DEST"
+
+          echo
+          echo "=== ANDROID PLATFORM FILE ==="
+          cat "$DEST"
+
+      # ------------------------------------------------------------
+      # Make Blender select the Android platform.
+      # ------------------------------------------------------------
+
+      - name: Patch Blender platform selection
+        run: |
+          set -eux
+
+          SOURCE="$GITHUB_WORKSPACE/blender-source/blender-5.2.2"
+          CMAKE_FILE="$SOURCE/CMakeLists.txt"
+
+          cp "$CMAKE_FILE" "$CMAKE_FILE.original"
+
+          python3 - "$CMAKE_FILE" <<'PY'
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          text = path.read_text()
+
+          target = "include(platform_unix)"
+
+          replacement = """if(ANDROID)
+            include(platform_android)
+          else()
+            include(platform_unix)
+          endif()"""
+
+          count = text.count(target)
+
+          print(f"Found include(platform_unix): {count}")
+
+          if count != 1:
+              raise SystemExit(
+                  f"Expected exactly one include(platform_unix), found {count}"
+              )
+
+          path.write_text(text.replace(target, replacement, 1))
+
+          print("Android platform selection patched.")
+          PY
+
+      # ------------------------------------------------------------
+      # Configure Blender.
+      # ------------------------------------------------------------
+
+      - name: Configure Blender for Android
+        continue-on-error: true
+        run: |
+          set -o pipefail
+
+          SOURCE="$GITHUB_WORKSPACE/blender-source/blender-5.2.2"
+          BUILD="$GITHUB_WORKSPACE/build-android"
+
+          rm -rf "$BUILD"
+          mkdir -p "$BUILD"
+
+          cd "$BUILD"
+
+          HOST_PYTHON="$GITHUB_WORKSPACE/cpython/cross-build/build/python"
+
+          test -x "$HOST_PYTHON"
+
+          echo
+          echo "=========================================="
+          echo " Blender 5.2.2 Android Configure"
+          echo "=========================================="
+          echo
+          echo "Target Python:"
+          echo "$PYTHON_VERSION"
+          echo
+          echo "Host Python:"
+          echo "$HOST_PYTHON"
+          echo
+          echo "Android Python include:"
+          echo "$PYTHON_INCLUDE_DIR"
+          echo
+          echo "Android Python library:"
+          echo "$PYTHON_LIBRARY"
+          echo
+
+          cmake -G Ninja \
+            -DCMAKE_SYSTEM_NAME=Android \
+            -DCMAKE_ANDROID_NDK="$ANDROID_NDK" \
+            -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a \
+            -DCMAKE_ANDROID_API=29 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPYTHON_VERSION=3.13 \
+            -DPYTHON_EXECUTABLE="$HOST_PYTHON" \
+            -DPYTHON_INCLUDE_DIR="$PYTHON_INCLUDE_DIR" \
+            -DPYTHON_INCLUDE_DIRS="$PYTHON_INCLUDE_DIR" \
+            -DPYTHON_INCLUDE_CONFIG_DIR="$PYTHON_INCLUDE_CONFIG_DIR" \
+            -DPYTHON_LIBRARY="$PYTHON_LIBRARY" \
+            -DPYTHON_LIBRARIES="$PYTHON_LIBRARY" \
+            -DPYTHON_LIBPATH="$PYTHON_LIBPATH" \
+            -DWITH_GHOST_X11=OFF \
+            -DWITH_GHOST_WAYLAND=OFF \
+            -DWITH_GHOST_SDL=OFF \
+            -DWITH_HEADLESS=OFF \
+            -DWITH_VULKAN_BACKEND=ON \
+            -DWITH_OPENGL_BACKEND=OFF \
+            -DWITH_LIBS_PRECOMPILED=OFF \
+            "$SOURCE" \
+            2>&1 | tee cmake-android.log
+
+      # ------------------------------------------------------------
+      # Show what happened.
+      # ------------------------------------------------------------
+
+      - name: Show configure result
+        if: always()
+        run: |
+          LOG="$GITHUB_WORKSPACE/build-android/cmake-android.log"
+
+          echo
+          echo "=========================================="
+          echo " CONFIGURE RESULT"
+          echo "=========================================="
+
+          if [ -f "$LOG" ]; then
+
+            echo
+            echo "=== ANDROID PLATFORM ==="
+
+            grep -n -E \
+              "Configuring Blender for Android|Android platform configuration loaded|Android ABI|Android API" \
+              "$LOG" || true
+
+            echo
+            echo "=== PYTHON ==="
+
+            grep -n -E \
+              "Python|PYTHON" \
+              "$LOG" \
+              | tail -80 || true
+
+            echo
+            echo "=== ERRORS ==="
+
+            grep -n -E \
+              "CMake Error|Could NOT find|NOTFOUND|not found|unsupported|Unsupported|error:" \
+              "$LOG" \
+              | tail -120 || true
+
+            echo
+            echo "=== LAST 250 LINES ==="
+
+            tail -250 "$LOG"
+
+          else
+            echo "No CMake log was produced."
+          fi
+
+      # ------------------------------------------------------------
+      # Upload diagnostic files.
+      # ------------------------------------------------------------
+
+      - name: Upload configure diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blender-5.2.2-android-configure
+          path: |
+            build-android/cmake-android.log
+            blender-source/blender-5.2.2/CMakeLists.txt.original
+            blender-source/blender-5.2.2/CMakeLists.txt
+            blender-source/blender-5.2.2/build_files/cmake/platform/platform_android.cmake
+          if-no-files-found: warn
