@@ -53,7 +53,7 @@ jobs:
           "$TOOLCHAIN/bin/clang" --version
 
           echo
-          echo "=== ARM64 TARGET TEST ==="
+          echo "=== ARM64 ANDROID TARGET TEST ==="
 
           "$TOOLCHAIN/bin/clang" \
             --target=aarch64-linux-android29 \
@@ -95,14 +95,19 @@ jobs:
             "https://download.blender.org/source/blender-5.2.2.tar.xz" \
             -o blender-5.2.2.tar.xz
 
+          test -f blender-5.2.2.tar.xz
+
           tar -xf blender-5.2.2.tar.xz
 
           SOURCE="$GITHUB_WORKSPACE/blender-source/blender-5.2.2"
 
           test -d "$SOURCE"
 
-          echo "Blender source located at:"
+          echo "Blender source:"
           echo "$SOURCE"
+
+          echo
+          echo "Searching for Python version..."
 
           PYTHON_VERSION="$(
             sed -n \
@@ -112,7 +117,7 @@ jobs:
           )"
 
           if [ -z "$PYTHON_VERSION" ]; then
-            echo "Could not determine Blender Python version."
+            echo "ERROR: Could not determine Blender Python version."
             exit 1
           fi
 
@@ -122,7 +127,7 @@ jobs:
 
           echo "PYTHON_VERSION=$PYTHON_VERSION" >> "$GITHUB_ENV"
 
-      - name: Clone CPython source
+      - name: Clone CPython 3.13 source
         run: |
           set -eux
 
@@ -143,12 +148,20 @@ jobs:
           git describe --tags --always
 
           echo
-          echo "=== ANDROID SOURCE ==="
+          echo "=== SOURCE TREE ==="
+          ls -la | head -50
 
-          test -f Platforms/Android/README.md
-          test -f Platforms/Android/__main__.py
+          echo
+          echo "=== ANDROID DIRECTORY ==="
 
-          echo "Platforms/Android found."
+          test -d Android
+          test -f Android/README.md
+          test -f Android/android.py
+
+          ls -la Android
+
+          echo
+          echo "CPython Android build system: FOUND"
 
       - name: Inspect CPython Android build system
         run: |
@@ -156,16 +169,14 @@ jobs:
 
           cd "$GITHUB_WORKSPACE/cpython"
 
-          echo "=== Platforms/Android ==="
-          ls -la Platforms/Android
+          echo "=== ANDROID BUILD HELP ==="
+
+          python3 Android/android.py --help
 
           echo
-          echo "=== BUILD HELP ==="
-          python3 Platforms/Android build --help
+          echo "=== CONFIGURE-HOST HELP ==="
 
-          echo
-          echo "=== HOST HELP ==="
-          python3 Platforms/Android configure-host --help
+          python3 Android/android.py configure-host --help
 
       - name: Build CPython for Android ARM64
         run: |
@@ -175,12 +186,14 @@ jobs:
 
           HOST="aarch64-linux-android"
 
+          echo
           echo "=========================================="
           echo " Building CPython $PYTHON_VERSION"
           echo " Target: $HOST"
           echo "=========================================="
+          echo
 
-          python3 Platforms/Android build "$HOST"
+          python3 Android/android.py build "$HOST"
 
       - name: Verify Android Python
         run: |
@@ -189,7 +202,7 @@ jobs:
           PYTHON_DIR="$GITHUB_WORKSPACE/cpython/cross-build/aarch64-linux-android"
           PREFIX="$PYTHON_DIR/prefix"
 
-          echo "Android Python directory:"
+          echo "Android Python build directory:"
           echo "$PYTHON_DIR"
 
           test -d "$PYTHON_DIR"
@@ -210,7 +223,7 @@ jobs:
             exit 1
           fi
 
-          echo "FOUND:"
+          echo "Python.h FOUND:"
           echo "$PYTHON_HEADER"
 
           echo
@@ -233,16 +246,18 @@ jobs:
             exit 1
           fi
 
-          echo "FOUND:"
+          echo "Python library FOUND:"
           echo "$PYTHON_LIBRARY"
 
           echo
           echo "=== PREFIX SIZE ==="
+
           du -sh "$PREFIX"
 
           echo
           echo "=== PREFIX CONTENTS ==="
-          find "$PREFIX" -maxdepth 2 -type d | head -80
+
+          find "$PREFIX" -maxdepth 2 -type d | head -100
 
       - name: Package Android Python
         if: success()
@@ -251,10 +266,10 @@ jobs:
 
           cd "$GITHUB_WORKSPACE/cpython"
 
-          python3 Platforms/Android package aarch64-linux-android
+          python3 Android/android.py package aarch64-linux-android
 
           echo
-          echo "=== DISTRIBUTION ==="
+          echo "=== ANDROID PYTHON DISTRIBUTION ==="
 
           find \
             "$GITHUB_WORKSPACE/cpython/cross-build/aarch64-linux-android/dist" \
