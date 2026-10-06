@@ -14,6 +14,11 @@ jobs:
       - name: Show environment
         run: |
           set -eux
+
+          echo "=========================================="
+          echo " GitHub Actions Environment"
+          echo "=========================================="
+
           uname -a
           nproc
           free -h
@@ -43,11 +48,16 @@ jobs:
             libjpeg-dev \
             libpng-dev \
             libtiff-dev \
-            openimageio-tools
+            openimageio-tools \
+            python3-dev
 
       - name: Verify base dependencies
         run: |
           set -eux
+
+          echo "=========================================="
+          echo " Base Dependency Check"
+          echo "=========================================="
 
           echo "GCC:"
           gcc --version
@@ -61,12 +71,22 @@ jobs:
           echo "LLVM:"
           llvm-config --version
 
+          echo "Python:"
+          python3 --version
+
           echo "iconvert:"
           command -v iconvert
           iconvert --help >/dev/null
 
-          echo "System OIIO version:"
+          echo "System OIIO:"
           pkg-config --modversion OpenImageIO || true
+
+      # ============================================================
+      # OpenImageIO 2.5
+      #
+      # Ubuntu 24.04 provides OIIO 2.4.x.
+      # OSL 1.15 requires OIIO >= 2.5.
+      # ============================================================
 
       - name: Download OpenImageIO 2.5.19.1
         run: |
@@ -99,8 +119,11 @@ jobs:
           BUILD="$GITHUB_WORKSPACE/oiio-build"
           INSTALL="$GITHUB_WORKSPACE/oiio-install"
 
-          rm -rf "$BUILD" "$INSTALL"
-          mkdir -p "$BUILD" "$INSTALL"
+          rm -rf "$BUILD"
+          rm -rf "$INSTALL"
+
+          mkdir -p "$BUILD"
+          mkdir -p "$INSTALL"
 
           echo "=========================================="
           echo " Configuring OpenImageIO 2.5.19.1"
@@ -155,30 +178,143 @@ jobs:
             --target install \
             --parallel "$(nproc)"
 
-      - name: Verify OpenImageIO 2.5 build
+      - name: Verify OpenImageIO
         run: |
           set -eux
 
           INSTALL="$GITHUB_WORKSPACE/oiio-install"
 
-          echo "OIIO install directory:"
-          find "$INSTALL" -maxdepth 4 -type f | sort | head -150
+          echo "=========================================="
+          echo " Verifying OpenImageIO"
+          echo "=========================================="
 
           test -d "$INSTALL/include"
           test -d "$INSTALL/lib"
 
-          echo "Installed OIIO libraries:"
+          echo "OIIO CMake package:"
+          find "$INSTALL" \
+            -name "OpenImageIOConfig.cmake" \
+            -print
+
+          test -n "$(
+            find "$INSTALL" \
+              -name "OpenImageIOConfig.cmake" \
+              -print \
+              -quit
+          )"
+
+          echo "OIIO libraries:"
           find "$INSTALL" \
             \( \
-              -name '*OpenImageIO*.so*' \
-              -o -name '*OpenImageIO*.a' \
+              -name "*OpenImageIO*.so*" \
+              -o -name "*OpenImageIO*.a" \
             \) \
             -print
 
-          echo "Installed OIIO CMake package:"
+      # ============================================================
+      # pybind11
+      #
+      # OSL 1.15 requires pybind11.
+      # Build it ourselves so the runner's package version does not
+      # matter.
+      # ============================================================
+
+      - name: Download pybind11 3.0.0
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE"
+
+          PYBIND11_VERSION="3.0.0"
+
+          curl -L --fail --retry 5 --retry-all-errors \
+            "https://github.com/pybind/pybind11/archive/refs/tags/v${PYBIND11_VERSION}.tar.gz" \
+            -o "pybind11-${PYBIND11_VERSION}.tar.gz"
+
+          test -f "pybind11-${PYBIND11_VERSION}.tar.gz"
+
+          rm -rf pybind11-source
+          mkdir -p pybind11-source
+
+          tar -xf "pybind11-${PYBIND11_VERSION}.tar.gz" \
+            -C pybind11-source \
+            --strip-components=1
+
+          test -f pybind11-source/CMakeLists.txt
+
+      - name: Configure pybind11
+        run: |
+          set -eux
+
+          SOURCE="$GITHUB_WORKSPACE/pybind11-source"
+          BUILD="$GITHUB_WORKSPACE/pybind11-build"
+          INSTALL="$GITHUB_WORKSPACE/pybind11-install"
+
+          rm -rf "$BUILD"
+          rm -rf "$INSTALL"
+
+          mkdir -p "$BUILD"
+          mkdir -p "$INSTALL"
+
+          echo "=========================================="
+          echo " Configuring pybind11 3.0.0"
+          echo "=========================================="
+
+          cmake \
+            -S "$SOURCE" \
+            -B "$BUILD" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$INSTALL" \
+            -DPYBIND11_TEST=OFF \
+            -DPYBIND11_NOPYTHON=OFF
+
+      - name: Install pybind11
+        run: |
+          set -eux
+
+          BUILD="$GITHUB_WORKSPACE/pybind11-build"
+
+          cmake --build "$BUILD" \
+            --target install \
+            --parallel "$(nproc)"
+
+      - name: Verify pybind11
+        run: |
+          set -eux
+
+          INSTALL="$GITHUB_WORKSPACE/pybind11-install"
+
+          echo "=========================================="
+          echo " Verifying pybind11"
+          echo "=========================================="
+
+          test -d "$INSTALL/include"
+
+          echo "pybind11 CMake package:"
           find "$INSTALL" \
-            -name 'OpenImageIOConfig.cmake' \
+            -name "pybind11Config.cmake" \
             -print
+
+          PYBIND_CONFIG="$(
+            find "$INSTALL" \
+              -name "pybind11Config.cmake" \
+              -print \
+              -quit
+          )"
+
+          test -n "$PYBIND_CONFIG"
+
+          echo "pybind11 include:"
+          find "$INSTALL/include" \
+            -maxdepth 2 \
+            -type f \
+            -name "pybind11.h" \
+            -print
+
+      # ============================================================
+      # OSL 1.15.3.0
+      # ============================================================
 
       - name: Download OSL 1.15.3.0
         run: |
@@ -206,27 +342,31 @@ jobs:
       - name: Configure OSL
         env:
           OpenImageIO_ROOT: /home/runner/work/Blender-port-mobile-unofficial-/Blender-port-mobile-unofficial-/oiio-install
+          pybind11_ROOT: /home/runner/work/Blender-port-mobile-unofficial-/Blender-port-mobile-unofficial-/pybind11-install
+
         run: |
           set -eux
 
           SOURCE="$GITHUB_WORKSPACE/osl-source"
           BUILD="$GITHUB_WORKSPACE/osl-build"
           OIIO="$GITHUB_WORKSPACE/oiio-install"
+          PYBIND11="$GITHUB_WORKSPACE/pybind11-install"
 
           rm -rf "$BUILD"
           mkdir -p "$BUILD"
 
           export OpenImageIO_ROOT="$OIIO"
+          export pybind11_ROOT="$PYBIND11"
 
-          # Avoid "unbound variable" when CMAKE_PREFIX_PATH
-          # does not already exist in the GitHub Actions environment.
-          export CMAKE_PREFIX_PATH="$OIIO:${CMAKE_PREFIX_PATH:-}"
+          # CMAKE_PREFIX_PATH may not exist in GitHub Actions.
+          export CMAKE_PREFIX_PATH="$PYBIND11:$OIIO:${CMAKE_PREFIX_PATH:-}"
 
           echo "=========================================="
           echo " Configuring OSL 1.15.3.0"
           echo "=========================================="
 
           echo "OpenImageIO_ROOT=$OpenImageIO_ROOT"
+          echo "pybind11_ROOT=$pybind11_ROOT"
           echo "CMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH"
 
           cmake \
@@ -240,7 +380,8 @@ jobs:
             -DOSL_BUILD_DOCS=OFF \
             -DOSL_USE_OPTIX=OFF \
             -DSTOP_ON_WARNING=0 \
-            -DOpenImageIO_ROOT="$OIIO"
+            -DOpenImageIO_ROOT="$OIIO" \
+            -Dpybind11_ROOT="$PYBIND11"
 
       - name: Build OSL
         run: |
@@ -275,7 +416,11 @@ jobs:
             exit 1
           fi
 
-          echo "OSLC: $OSLC"
+          echo "=========================================="
+          echo " oslc found"
+          echo "=========================================="
+
+          echo "OSLC=$OSLC"
 
           "$OSLC" --help | head -80
 
@@ -312,16 +457,22 @@ jobs:
 
           test -f test.oso
 
+          echo "=========================================="
+          echo " OSL shader compilation successful"
+          echo "=========================================="
+
           ls -lh test.oso
 
-      - name: Upload OIIO and OSL diagnostics
+      - name: Upload OIIO, pybind11 and OSL diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: oiio-2.5.19.1-and-osl-1.15.3.0-host
+          name: oiio-2.5.19.1-pybind11-3.0.0-osl-1.15.3.0-host
           path: |
             oiio-build
             oiio-install
+            pybind11-build
+            pybind11-install
             osl-build
             osl-test/test.oso
           if-no-files-found: warn
@@ -333,6 +484,7 @@ jobs:
           echo " OSL HOST BOOTSTRAP SUCCESS"
           echo "=========================================="
           echo "OpenImageIO 2.5.19.1: BUILT"
+          echo "pybind11 3.0.0: BUILT"
           echo "OSL 1.15.3.0: BUILT"
           echo "oslc: BUILT"
           echo "test.oso: COMPILED"
