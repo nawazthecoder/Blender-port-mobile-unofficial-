@@ -40,7 +40,10 @@ jobs:
             bison \
             flex \
             clang \
+            clang-18 \
             llvm-dev \
+            llvm-18-dev \
+            libclang-18-dev \
             libboost-dev \
             libopenexr-dev \
             libimath-dev \
@@ -51,16 +54,28 @@ jobs:
             openimageio-tools \
             python3-dev
 
-      - name: Verify base dependencies
+      - name: Verify host toolchain
         run: |
           set -eux
 
           echo "=========================================="
-          echo " Base Dependency Check"
+          echo " Host Toolchain Check"
           echo "=========================================="
 
           echo "GCC:"
           gcc --version
+
+          echo "G++:"
+          g++ --version
+
+          echo "Clang:"
+          clang --version
+
+          echo "Clang++:"
+          clang++ --version
+
+          echo "LLVM:"
+          llvm-config --version
 
           echo "CMake:"
           cmake --version
@@ -68,11 +83,12 @@ jobs:
           echo "Ninja:"
           ninja --version
 
-          echo "LLVM:"
-          llvm-config --version
-
           echo "Python:"
           python3 --version
+
+          echo "Clang TargetInfo header:"
+          test -f /usr/lib/llvm-18/include/clang/Basic/TargetInfo.h
+          ls -lh /usr/lib/llvm-18/include/clang/Basic/TargetInfo.h
 
           echo "iconvert:"
           command -v iconvert
@@ -82,10 +98,7 @@ jobs:
           pkg-config --modversion OpenImageIO || true
 
       # ============================================================
-      # OpenImageIO 2.5
-      #
-      # Ubuntu 24.04 provides OIIO 2.4.x.
-      # OSL 1.15 requires OIIO >= 2.5.
+      # OpenImageIO 2.5.19.1
       # ============================================================
 
       - name: Download OpenImageIO 2.5.19.1
@@ -196,12 +209,14 @@ jobs:
             -name "OpenImageIOConfig.cmake" \
             -print
 
-          test -n "$(
+          OIIO_CONFIG="$(
             find "$INSTALL" \
               -name "OpenImageIOConfig.cmake" \
               -print \
               -quit
           )"
+
+          test -n "$OIIO_CONFIG"
 
           echo "OIIO libraries:"
           find "$INSTALL" \
@@ -212,11 +227,7 @@ jobs:
             -print
 
       # ============================================================
-      # pybind11
-      #
-      # OSL 1.15 requires pybind11.
-      # Build it ourselves so the runner's package version does not
-      # matter.
+      # pybind11 3.0.0
       # ============================================================
 
       - name: Download pybind11 3.0.0
@@ -291,11 +302,6 @@ jobs:
 
           test -d "$INSTALL/include"
 
-          echo "pybind11 CMake package:"
-          find "$INSTALL" \
-            -name "pybind11Config.cmake" \
-            -print
-
           PYBIND_CONFIG="$(
             find "$INSTALL" \
               -name "pybind11Config.cmake" \
@@ -305,7 +311,10 @@ jobs:
 
           test -n "$PYBIND_CONFIG"
 
-          echo "pybind11 include:"
+          echo "pybind11 CMake package:"
+          echo "$PYBIND_CONFIG"
+
+          echo "pybind11 header:"
           find "$INSTALL/include" \
             -maxdepth 2 \
             -type f \
@@ -358,7 +367,6 @@ jobs:
           export OpenImageIO_ROOT="$OIIO"
           export pybind11_ROOT="$PYBIND11"
 
-          # CMAKE_PREFIX_PATH may not exist in GitHub Actions.
           export CMAKE_PREFIX_PATH="$PYBIND11:$OIIO:${CMAKE_PREFIX_PATH:-}"
 
           echo "=========================================="
@@ -485,6 +493,8 @@ jobs:
           echo "=========================================="
           echo "OpenImageIO 2.5.19.1: BUILT"
           echo "pybind11 3.0.0: BUILT"
+          echo "LLVM 18: AVAILABLE"
+          echo "Clang 18 headers: AVAILABLE"
           echo "OSL 1.15.3.0: BUILT"
           echo "oslc: BUILT"
           echo "test.oso: COMPILED"
