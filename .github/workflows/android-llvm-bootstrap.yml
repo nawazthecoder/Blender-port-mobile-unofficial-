@@ -1,0 +1,783 @@
+name: Blender 5.2.2 Android - LLVM ARM64 Bootstrap
+
+on:
+  workflow_dispatch:
+
+jobs:
+  llvm-android:
+    runs-on: ubuntu-24.04
+
+    env:
+      LLVM_VERSION: "20.1.8"
+      ANDROID_NDK_VERSION: "27.3.13750724"
+      ANDROID_API: "29"
+      ANDROID_ABI: "arm64-v8a"
+
+    steps:
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ============================================================
+      # RUNNER INFORMATION
+      # ============================================================
+
+      - name: Show runner environment
+        run: |
+          set -eux
+
+          echo "=========================================="
+          echo " LLVM Android Bootstrap"
+          echo "=========================================="
+
+          uname -a
+
+          echo
+          echo "CPU:"
+          nproc
+
+          echo
+          echo "Memory:"
+          free -h
+
+          echo
+          echo "Disk:"
+          df -h /
+
+      # ============================================================
+      # JAVA
+      # ============================================================
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # ============================================================
+      # ANDROID SDK
+      # ============================================================
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        shell: bash
+        run: |
+          set -eux
+
+          echo "=========================================="
+          echo " Installing Android NDK"
+          echo "=========================================="
+
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-${ANDROID_API}" \
+            "ndk;${ANDROID_NDK_VERSION}"
+
+          SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          NDK="$SDK_ROOT/ndk/${ANDROID_NDK_VERSION}"
+
+          if [ ! -d "$NDK" ]; then
+            echo "ERROR: Android NDK was not installed:"
+            echo "$NDK"
+            exit 1
+          fi
+
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$NDK" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK=$NDK" >> "$GITHUB_ENV"
+
+          echo
+          echo "Android SDK:"
+          echo "$SDK_ROOT"
+
+          echo
+          echo "Android NDK:"
+          echo "$NDK"
+
+      # ============================================================
+      # VERIFY ANDROID TOOLCHAIN
+      # ============================================================
+
+      - name: Verify Android toolchain
+        shell: bash
+        run: |
+          set -eux
+
+          echo "=========================================="
+          echo " Android Toolchain Check"
+          echo "=========================================="
+
+          test -d "$ANDROID_NDK_ROOT"
+
+          test -f \
+            "$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake"
+
+          TOOLCHAIN_BIN="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin"
+
+          test -x "$TOOLCHAIN_BIN/clang"
+          test -x "$TOOLCHAIN_BIN/clang++"
+
+          echo
+          echo "NDK:"
+          cat "$ANDROID_NDK_ROOT/source.properties"
+
+          echo
+          echo "Clang:"
+          "$TOOLCHAIN_BIN/clang" --version
+
+          echo
+          echo "Clang++:"
+          "$TOOLCHAIN_BIN/clang++" --version
+
+          echo
+          echo "Android target compiler test:"
+
+          "$TOOLCHAIN_BIN/clang" \
+            --target=aarch64-linux-android${ANDROID_API} \
+            -c \
+            -x c \
+            /dev/null \
+            -o /tmp/android-test.o
+
+          test -f /tmp/android-test.o
+
+          echo
+          echo "Android ARM64 compiler invocation works."
+
+      # ============================================================
+      # DOWNLOAD LLVM
+      # ============================================================
+
+      - name: Download LLVM 20.1.8
+        shell: bash
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE"
+
+          LLVM_ARCHIVE="llvm-project-${LLVM_VERSION}.src.tar.xz"
+
+          echo "=========================================="
+          echo " Downloading LLVM ${LLVM_VERSION}"
+          echo "=========================================="
+
+          curl \
+            -L \
+            --fail \
+            --retry 5 \
+            --retry-all-errors \
+            "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/${LLVM_ARCHIVE}" \
+            -o "$LLVM_ARCHIVE"
+
+          test -s "$LLVM_ARCHIVE"
+
+          rm -rf llvm-source
+          mkdir -p llvm-source
+
+          tar \
+            -xf "$LLVM_ARCHIVE" \
+            -C llvm-source \
+            --strip-components=1
+
+          test -f llvm-source/llvm/CMakeLists.txt
+          test -f llvm-source/clang/CMakeLists.txt
+
+          echo
+          echo "LLVM source:"
+          echo "$GITHUB_WORKSPACE/llvm-source"
+
+      # ============================================================
+      # HOST TABLEGEN
+      #
+      # These executables run on Ubuntu x86_64.
+      #
+      # They are NOT Android binaries.
+      # ============================================================
+
+      - name: Configure host LLVM TableGen tools
+        shell: bash
+        run: |
+          set -eux
+
+          SOURCE="$GITHUB_WORKSPACE/llvm-source/llvm"
+          BUILD="$GITHUB_WORKSPACE/llvm-host-build"
+
+          rm -rf "$BUILD"
+          mkdir -p "$BUILD"
+
+          echo "=========================================="
+          echo " Configuring HOST TableGen"
+          echo "=========================================="
+
+          cmake \
+            -S "$SOURCE" \
+            -B "$BUILD" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_PROJECTS="clang" \
+            -DLLVM_TARGETS_TO_BUILD="X86" \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_BUILD_TESTS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_BUILD_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_BUILD_BENCHMARKS=OFF \
+            -DLLVM_INCLUDE_DOCS=OFF \
+            -DLLVM_ENABLE_ZLIB=OFF \
+            -DLLVM_ENABLE_ZSTD=OFF \
+            -DLLVM_ENABLE_TERMINFO=OFF \
+            -DLLVM_ENABLE_LIBXML2=OFF \
+            -DLLVM_ENABLE_LIBEDIT=OFF \
+            -DLLVM_ENABLE_RTTI=ON \
+            -DLLVM_ENABLE_EH=ON
+
+      - name: Build host TableGen tools
+        shell: bash
+        run: |
+          set -u
+          set -o pipefail
+
+          BUILD="$GITHUB_WORKSPACE/llvm-host-build"
+          LOG="$GITHUB_WORKSPACE/llvm-host-build.log"
+
+          echo "=========================================="
+          echo " Building HOST TableGen tools"
+          echo "=========================================="
+
+          set +e
+
+          cmake \
+            --build "$BUILD" \
+            --target llvm-tblgen clang-tblgen \
+            --parallel "$(nproc)" \
+            > "$LOG" 2>&1
+
+          STATUS=$?
+
+          set -e
+
+          if [ "$STATUS" -ne 0 ]; then
+            echo
+            echo "=========================================="
+            echo " HOST TABLEGEN BUILD FAILED"
+            echo "=========================================="
+
+            echo
+            echo "========== IMPORTANT ERRORS =========="
+
+            grep -E \
+              "fatal error:|undefined reference|collect2: error|error: |FAILED:|ninja: build stopped" \
+              "$LOG" \
+              | tail -100 || true
+
+            echo
+            echo "========== LAST 150 LINES =========="
+
+            tail -150 "$LOG"
+
+            exit "$STATUS"
+          fi
+
+          echo
+          echo "Host TableGen tools built successfully."
+
+      # ============================================================
+      # LOCATE HOST TABLEGEN
+      # ============================================================
+
+      - name: Locate host TableGen tools
+        shell: bash
+        run: |
+          set -eux
+
+          BUILD="$GITHUB_WORKSPACE/llvm-host-build"
+
+          LLVM_TBLGEN="$(
+            find "$BUILD" \
+              -type f \
+              -name llvm-tblgen \
+              -perm -111 \
+              -print \
+              -quit
+          )"
+
+          CLANG_TBLGEN="$(
+            find "$BUILD" \
+              -type f \
+              -name clang-tblgen \
+              -perm -111 \
+              -print \
+              -quit
+          )"
+
+          if [ -z "$LLVM_TBLGEN" ]; then
+            echo "ERROR: llvm-tblgen was not found."
+            exit 1
+          fi
+
+          if [ -z "$CLANG_TBLGEN" ]; then
+            echo "ERROR: clang-tblgen was not found."
+            exit 1
+          fi
+
+          HOST_TOOL_DIR="$(dirname "$LLVM_TBLGEN")"
+
+          test -x "$HOST_TOOL_DIR/llvm-tblgen"
+          test -x "$HOST_TOOL_DIR/clang-tblgen"
+
+          echo "=========================================="
+          echo " HOST TABLEGEN TOOLS FOUND"
+          echo "=========================================="
+
+          echo
+          echo "Host tool directory:"
+          echo "$HOST_TOOL_DIR"
+
+          echo
+          echo "llvm-tblgen:"
+          echo "$LLVM_TBLGEN"
+
+          echo
+          echo "clang-tblgen:"
+          echo "$CLANG_TBLGEN"
+
+          echo
+          "$LLVM_TBLGEN" --version
+
+          echo
+          "$CLANG_TBLGEN" --version
+
+          echo
+          echo "LLVM_NATIVE_TOOL_DIR=$HOST_TOOL_DIR" >> "$GITHUB_ENV"
+          echo "LLVM_TABLEGEN=$LLVM_TBLGEN" >> "$GITHUB_ENV"
+          echo "CLANG_TABLEGEN=$CLANG_TBLGEN" >> "$GITHUB_ENV"
+
+      # ============================================================
+      # CONFIGURE LLVM FOR ANDROID ARM64
+      # ============================================================
+
+      - name: Configure Android LLVM
+        shell: bash
+        run: |
+          set -eux
+
+          SOURCE="$GITHUB_WORKSPACE/llvm-source/llvm"
+          BUILD="$GITHUB_WORKSPACE/llvm-android-build"
+          INSTALL="$GITHUB_WORKSPACE/llvm-android-install"
+
+          TOOLCHAIN="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake"
+
+          rm -rf "$BUILD"
+          rm -rf "$INSTALL"
+
+          mkdir -p "$BUILD"
+          mkdir -p "$INSTALL"
+
+          echo "=========================================="
+          echo " Configuring LLVM ${LLVM_VERSION}"
+          echo " Android ARM64"
+          echo "=========================================="
+
+          echo
+          echo "Source:"
+          echo "$SOURCE"
+
+          echo
+          echo "Build:"
+          echo "$BUILD"
+
+          echo
+          echo "Install:"
+          echo "$INSTALL"
+
+          echo
+          echo "Host TableGen:"
+          echo "$LLVM_NATIVE_TOOL_DIR"
+
+          echo
+          echo "Android NDK:"
+          echo "$ANDROID_NDK_ROOT"
+
+          cmake \
+            -S "$SOURCE" \
+            -B "$BUILD" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$INSTALL" \
+            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+            -DANDROID_ABI="$ANDROID_ABI" \
+            -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DANDROID_STL="c++_shared" \
+            -DCMAKE_C_COMPILER_TARGET="aarch64-linux-android${ANDROID_API}" \
+            -DCMAKE_CXX_COMPILER_TARGET="aarch64-linux-android${ANDROID_API}" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DLLVM_ENABLE_PIC=ON \
+            -DLLVM_ENABLE_PROJECTS="clang" \
+            -DLLVM_TARGETS_TO_BUILD="AArch64" \
+            -DLLVM_TARGET_ARCH="AArch64" \
+            -DLLVM_DEFAULT_TARGET_TRIPLE="aarch64-linux-android${ANDROID_API}" \
+            -DLLVM_NATIVE_TOOL_DIR="$LLVM_NATIVE_TOOL_DIR" \
+            -DLLVM_TABLEGEN="$LLVM_TABLEGEN" \
+            -DCLANG_TABLEGEN="$CLANG_TABLEGEN" \
+            -DLLVM_USE_HOST_TOOLS=ON \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_BUILD_TESTS=OFF \
+            -LLVM_BUILD_TOOLS=OFF \
+            -DLLVM_INCLUDE_TOOLS=OFF \
+            -DLLVM_BUILD_UTILS=OFF \
+            -DLLVM_INCLUDE_UTILS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_BUILD_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_BUILD_BENCHMARKS=OFF \
+            -DLLVM_INCLUDE_DOCS=OFF \
+            -DLLVM_ENABLE_ZLIB=OFF \
+            -DLLVM_ENABLE_ZSTD=OFF \
+            -DLLVM_ENABLE_TERMINFO=OFF \
+            -DLLVM_ENABLE_LIBXML2=OFF \
+            -DLLVM_ENABLE_LIBEDIT=OFF \
+            -DLLVM_ENABLE_RTTI=ON \
+            -DLLVM_ENABLE_EH=ON \
+            -DLLVM_ENABLE_UNWIND_TABLES=ON \
+            -DLLVM_BUILD_LLVM_DYLIB=ON \
+            -DLLVM_LINK_LLVM_DYLIB=ON \
+            -DCLANG_INCLUDE_TESTS=OFF \
+            -DCLANG_INCLUDE_DOCS=OFF
+
+      # ============================================================
+      # BUILD ANDROID LLVM
+      # ============================================================
+
+      - name: Build Android LLVM
+        shell: bash
+        run: |
+          set -u
+          set -o pipefail
+
+          BUILD="$GITHUB_WORKSPACE/llvm-android-build"
+          LOG="$GITHUB_WORKSPACE/llvm-android-build.log"
+
+          echo "=========================================="
+          echo " Building LLVM ${LLVM_VERSION}"
+          echo " Android ARM64"
+          echo "=========================================="
+
+          set +e
+
+          cmake \
+            --build "$BUILD" \
+            --parallel "$(nproc)" \
+            > "$LOG" 2>&1
+
+          STATUS=$?
+
+          set -e
+
+          if [ "$STATUS" -ne 0 ]; then
+            echo
+            echo "=========================================="
+            echo " ANDROID LLVM BUILD FAILED"
+            echo "=========================================="
+
+            echo
+            echo "========== IMPORTANT ERRORS =========="
+
+            grep -E \
+              "fatal error:|undefined reference|ld.lld: error|collect2: error|error: |FAILED:|ninja: build stopped" \
+              "$LOG" \
+              | tail -120 || true
+
+            echo
+            echo "========== LAST 150 LINES =========="
+
+            tail -150 "$LOG"
+
+            exit "$STATUS"
+          fi
+
+          echo
+          echo "Android LLVM build completed successfully."
+
+      # ============================================================
+      # INSTALL
+      # ============================================================
+
+      - name: Install Android LLVM
+        shell: bash
+        run: |
+          set -u
+          set -o pipefail
+
+          BUILD="$GITHUB_WORKSPACE/llvm-android-build"
+          LOG="$GITHUB_WORKSPACE/llvm-android-install.log"
+
+          echo "=========================================="
+          echo " Installing Android LLVM"
+          echo "=========================================="
+
+          set +e
+
+          cmake \
+            --build "$BUILD" \
+            --target install \
+            --parallel "$(nproc)" \
+            > "$LOG" 2>&1
+
+          STATUS=$?
+
+          set -e
+
+          if [ "$STATUS" -ne 0 ]; then
+            echo
+            echo "=========================================="
+            echo " LLVM INSTALL FAILED"
+            echo "=========================================="
+
+            cat "$LOG"
+
+            exit "$STATUS"
+          fi
+
+          echo
+          echo "Android LLVM installation completed."
+
+      # ============================================================
+      # VERIFY LLVM ARM64
+      # ============================================================
+
+      - name: Verify Android LLVM ARM64
+        shell: bash
+        run: |
+          set -eux
+
+          INSTALL="$GITHUB_WORKSPACE/llvm-android-install"
+
+          echo "=========================================="
+          echo " Verifying Android LLVM ARM64"
+          echo "=========================================="
+
+          test -d "$INSTALL/include"
+          test -d "$INSTALL/lib"
+
+          echo
+          echo "Installed LLVM libraries:"
+
+          find "$INSTALL/lib" \
+            -maxdepth 1 \
+            -type f \
+            \( \
+              -name "libLLVM*.so*" \
+              -o -name "libLLVM*.a" \
+              -o -name "libclang*.so*" \
+              -o -name "libclang*.a" \
+            \) \
+            -print \
+            | sort
+
+          LLVM_LIB="$(
+            find "$INSTALL/lib" \
+              -maxdepth 1 \
+              -type f \
+              \( \
+                -name "libLLVM*.so*" \
+                -o -name "libLLVM*.a" \
+              \) \
+              -print \
+              -quit
+          )"
+
+          if [ -z "$LLVM_LIB" ]; then
+            echo "ERROR: No LLVM library was installed."
+            exit 1
+          fi
+
+          echo
+          echo "Selected LLVM library:"
+          echo "$LLVM_LIB"
+
+          echo
+          echo "File information:"
+          file "$LLVM_LIB"
+
+          echo
+          echo "ELF information:"
+          readelf -h "$LLVM_LIB" | grep -E \
+            "Class:|Machine:|Type:"
+
+          echo
+          echo "Checking ARM64 architecture..."
+
+          file "$LLVM_LIB" | grep -Ei \
+            "aarch64|ARM aarch64"
+
+      # ============================================================
+      # VERIFY LLVM / CLANG CMAKE PACKAGES
+      # ============================================================
+
+      - name: Verify LLVM and Clang CMake packages
+        shell: bash
+        run: |
+          set -eux
+
+          INSTALL="$GITHUB_WORKSPACE/llvm-android-install"
+
+          echo "=========================================="
+          echo " LLVM CMake Package Check"
+          echo "=========================================="
+
+          LLVM_CONFIG="$(
+            find "$INSTALL" \
+              -type f \
+              -name LLVMConfig.cmake \
+              -print \
+              -quit
+          )"
+
+          CLANG_CONFIG="$(
+            find "$INSTALL" \
+              -type f \
+              -name ClangConfig.cmake \
+              -print \
+              -quit
+          )"
+
+          if [ -z "$LLVM_CONFIG" ]; then
+            echo "ERROR: LLVMConfig.cmake was not installed."
+            exit 1
+          fi
+
+          if [ -z "$CLANG_CONFIG" ]; then
+            echo "ERROR: ClangConfig.cmake was not installed."
+            exit 1
+          fi
+
+          echo
+          echo "LLVMConfig.cmake:"
+          echo "$LLVM_CONFIG"
+
+          echo
+          echo "ClangConfig.cmake:"
+          echo "$CLANG_CONFIG"
+
+          echo
+          echo "Android LLVM root:"
+          echo "$INSTALL"
+
+          {
+            echo "ANDROID_LLVM_ROOT=$INSTALL"
+            echo "ANDROID_LLVM_CONFIG=$LLVM_CONFIG"
+            echo "ANDROID_CLANG_CONFIG=$CLANG_CONFIG"
+          } >> "$GITHUB_ENV"
+
+      # ============================================================
+      # ANDROID ARM64 SMOKE TEST
+      #
+      # Uses NDK clang directly with --target rather than assuming
+      # a versioned clang wrapper exists.
+      # ============================================================
+
+      - name: Android ARM64 compiler smoke test
+        shell: bash
+        run: |
+          set -eux
+
+          CLANG="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+
+          TESTDIR="$GITHUB_WORKSPACE/android-llvm-smoke"
+
+          rm -rf "$TESTDIR"
+          mkdir -p "$TESTDIR"
+
+          cat > "$TESTDIR/test.c" <<'EOF'
+          #include <stdint.h>
+
+          int main(void)
+          {
+              uint64_t value = 0x123456789abcdef0ULL;
+
+              return value == 0x123456789abcdef0ULL
+                  ? 0
+                  : 1;
+          }
+          EOF
+
+          "$CLANG" \
+            --target=aarch64-linux-android${ANDROID_API} \
+            -fPIE \
+            -pie \
+            "$TESTDIR/test.c" \
+            -o "$TESTDIR/test-arm64"
+
+          echo "=========================================="
+          echo " Android ARM64 Smoke Test"
+          echo "=========================================="
+
+          echo
+          echo "Binary:"
+          file "$TESTDIR/test-arm64"
+
+          echo
+          echo "ELF:"
+          readelf -h "$TESTDIR/test-arm64" | grep -E \
+            "Class:|Machine:|Type:"
+
+          echo
+          echo "Architecture:"
+          file "$TESTDIR/test-arm64" | grep -Ei \
+            "aarch64|ARM aarch64"
+
+          echo
+          echo "Android ARM64 compiler smoke test passed."
+
+      # ============================================================
+      # SAVE DIAGNOSTICS
+      # ============================================================
+
+      - name: Upload LLVM diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: llvm-${{ env.LLVM_VERSION }}-android-arm64
+          path: |
+            llvm-host-build.log
+            llvm-host-build
+            llvm-android-build.log
+            llvm-android-install.log
+            llvm-android-build
+            llvm-android-install
+            android-llvm-smoke
+          if-no-files-found: warn
+
+      # ============================================================
+      # SUCCESS
+      # ============================================================
+
+      - name: LLVM Android bootstrap complete
+        if: success()
+        run: |
+          echo "=========================================="
+          echo " LLVM ANDROID BOOTSTRAP SUCCESS"
+          echo "=========================================="
+          echo
+          echo "LLVM version: ${LLVM_VERSION}"
+          echo "Android ABI: ${ANDROID_ABI}"
+          echo "Android API: ${ANDROID_API}"
+          echo
+          echo "Host llvm-tblgen: BUILT"
+          echo "Host clang-tblgen: BUILT"
+          echo "LLVM ARM64: BUILT"
+          echo "Clang ARM64: BUILT"
+          echo "LLVM ARM64 architecture: VERIFIED"
+          echo "LLVM CMake package: VERIFIED"
+          echo "Clang CMake package: VERIFIED"
+          echo "Android ARM64 compiler smoke test: PASSED"
+          echo
+          echo "ANDROID_LLVM_ROOT:"
+          echo "$ANDROID_LLVM_ROOT"
+          echo
+          echo "Next stage: OpenImageIO ARM64"
