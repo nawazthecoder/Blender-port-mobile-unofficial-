@@ -1,4 +1,3 @@
-
 name: Blender 5.2.2 Android - OSL Host Bootstrap
 
 on:
@@ -26,7 +25,7 @@ jobs:
           df -h /
 
       # ============================================================
-      # Host dependencies
+      # HOST DEPENDENCIES
       # ============================================================
 
       - name: Install host build tools
@@ -76,6 +75,7 @@ jobs:
           gcc --version
           g++ --version
           clang --version
+          clang++ --version
           llvm-config --version
           cmake --version
           ninja --version
@@ -90,6 +90,7 @@ jobs:
           echo "Boost.Thread:"
           ldconfig -p | grep boost_thread || true
           test -f /usr/lib/x86_64-linux-gnu/libboost_thread.so
+          ls -lh /usr/lib/x86_64-linux-gnu/libboost_thread.so
 
           echo
           echo "iconvert:"
@@ -97,7 +98,7 @@ jobs:
           iconvert --help >/dev/null
 
       # ============================================================
-      # OpenImageIO 2.5.19.1
+      # OPENIMAGEIO 2.5.19.1
       # ============================================================
 
       - name: Download OpenImageIO 2.5.19.1
@@ -112,7 +113,7 @@ jobs:
             "https://github.com/AcademySoftwareFoundation/OpenImageIO/archive/refs/tags/v${OIIO_VERSION}.tar.gz" \
             -o "oiio-${OIIO_VERSION}.tar.gz"
 
-          test -f "oiio-${OIIO_VERSION}.tar.gz"
+          test -s "oiio-${OIIO_VERSION}.tar.gz"
 
           rm -rf oiio-source
           mkdir -p oiio-source
@@ -193,11 +194,11 @@ jobs:
           if [ "$STATUS" -ne 0 ]; then
             echo
             echo "=========================================="
-            echo " OpenImageIO BUILD FAILED"
+            echo " OPENIMAGEIO BUILD FAILED"
             echo "=========================================="
 
             echo
-            echo "========== IMPORTANT ERROR LINES =========="
+            echo "========== IMPORTANT ERRORS =========="
 
             grep -E \
               "fatal error:|undefined reference|collect2: error|error: |FAILED:|ninja: build stopped" \
@@ -255,7 +256,7 @@ jobs:
             -print
 
       # ============================================================
-      # pybind11 3.0.0
+      # PYBIND11 3.0.0
       # ============================================================
 
       - name: Download pybind11 3.0.0
@@ -270,7 +271,7 @@ jobs:
             "https://github.com/pybind/pybind11/archive/refs/tags/v${PYBIND11_VERSION}.tar.gz" \
             -o "pybind11-${PYBIND11_VERSION}.tar.gz"
 
-          test -f "pybind11-${PYBIND11_VERSION}.tar.gz"
+          test -s "pybind11-${PYBIND11_VERSION}.tar.gz"
 
           rm -rf pybind11-source
           mkdir -p pybind11-source
@@ -351,10 +352,10 @@ jobs:
           OSL_VERSION="1.15.3.0"
 
           curl -L --fail --retry 5 --retry-all-errors \
-            "https://github.com/AcademySoftwareFoundation/OpenShadingLanguage/archive/refs/tags/v${OSL_VERSION}.tar.gz" \
+            "https://github.com/AcademySoftwareFoundation/OpenShadingLanguage/releases/download/v${OSL_VERSION}/OSL-${OSL_VERSION}.tar.gz" \
             -o "osl-${OSL_VERSION}.tar.gz"
 
-          test -f "osl-${OSL_VERSION}.tar.gz"
+          test -s "osl-${OSL_VERSION}.tar.gz"
 
           rm -rf osl-source
           mkdir -p osl-source
@@ -379,6 +380,7 @@ jobs:
           PYBIND11="$GITHUB_WORKSPACE/pybind11-install"
 
           rm -rf "$BUILD"
+
           mkdir -p "$BUILD"
 
           export OpenImageIO_ROOT="$OIIO"
@@ -399,6 +401,7 @@ jobs:
             -B "$BUILD" \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$SOURCE/dist" \
             -DOSL_BUILD_TESTS=OFF \
             -DOSL_BUILD_PLUGINS=OFF \
             -DOSL_BUILD_SHADERS=ON \
@@ -407,10 +410,11 @@ jobs:
             -DSTOP_ON_WARNING=0 \
             -DOpenImageIO_ROOT="$OIIO" \
             -Dpybind11_ROOT="$PYBIND11" \
-            -DCMAKE_EXE_LINKER_FLAGS="-lboost_thread"
+            -DCMAKE_EXE_LINKER_FLAGS="-lboost_thread -lboost_system" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-lboost_thread -lboost_system"
 
       # ============================================================
-      # Build OSL
+      # BUILD OSL
       # ============================================================
 
       - name: Build OSL
@@ -443,7 +447,7 @@ jobs:
             echo "=========================================="
 
             echo
-            echo "========== IMPORTANT ERROR LINES =========="
+            echo "========== IMPORTANT ERRORS =========="
 
             grep -E \
               "fatal error:|undefined reference|collect2: error|error: |FAILED:|ninja: build stopped" \
@@ -464,13 +468,68 @@ jobs:
           echo "=========================================="
 
       # ============================================================
-      # Verify OSL distribution
+      # INSTALL OSL THE OFFICIAL WAY
       #
-      # OSL normally creates:
-      #
-      # osl-source/dist/
-      #
-      # This is the full OSL distribution.
+      # OSL's configured prefix is SOURCE/dist.
+      # Do NOT override it during cmake --install.
+      # ============================================================
+
+      - name: Install OSL distribution
+        shell: bash
+        run: |
+          set -u
+
+          BUILD="$GITHUB_WORKSPACE/osl-build"
+          SOURCE="$GITHUB_WORKSPACE/osl-source"
+          LOG="$GITHUB_WORKSPACE/osl-install.log"
+
+          echo "=========================================="
+          echo " Installing OSL Distribution"
+          echo "=========================================="
+
+          set +e
+
+          cmake \
+            --build "$BUILD" \
+            --target install \
+            > "$LOG" 2>&1
+
+          STATUS=$?
+
+          set -e
+
+          if [ "$STATUS" -ne 0 ]; then
+            echo
+            echo "=========================================="
+            echo " OSL INSTALL TARGET FAILED"
+            echo "=========================================="
+
+            cat "$LOG"
+
+            echo
+            echo "We will check whether the compiled OSL"
+            echo "tree still contains all required resources."
+
+          else
+            echo
+            echo "OSL install target completed successfully."
+          fi
+
+          echo
+          echo "Configured OSL prefix:"
+          echo "$SOURCE/dist"
+
+          echo
+          echo "Checking for OSL distribution:"
+
+          if [ -d "$SOURCE/dist" ]; then
+            echo "FOUND: $SOURCE/dist"
+          else
+            echo "NOT FOUND: $SOURCE/dist"
+          fi
+
+      # ============================================================
+      # LOCATE OSL RESOURCES
       # ============================================================
 
       - name: Locate OSL distribution
@@ -486,6 +545,10 @@ jobs:
           echo " Locating OSL Distribution"
           echo "=========================================="
 
+          # --------------------------------------------------------
+          # Find oslc.
+          # --------------------------------------------------------
+
           OSLC="$(
             find "$BUILD" \
               -type f \
@@ -497,42 +560,95 @@ jobs:
 
           if [ -z "$OSLC" ]; then
             echo "ERROR: oslc executable was not found."
+
             echo
             echo "Searching build tree:"
             find "$BUILD" \
               -type f \
               -name oslc \
               -print || true
+
             exit 1
           fi
 
           echo "OSLC:"
           echo "$OSLC"
 
-          # Prefer the distribution generated by OSL itself.
+          # --------------------------------------------------------
+          # Select the REAL OSL resource location.
+          #
+          # First choice:
+          #   generated dist/
+          #
+          # Second choice:
+          #   source shader directory
+          # --------------------------------------------------------
+
           if [ -f "$DIST/share/OSL/shaders/stdosl.h" ]; then
+
+            OSL_DIST="$DIST"
             OSL_SHADER_DIR="$DIST/share/OSL/shaders"
-            OSL_DIST="$DIST"
+
           elif [ -f "$SOURCE/src/shaders/stdosl.h" ]; then
+
+            OSL_DIST="$SOURCE"
             OSL_SHADER_DIR="$SOURCE/src/shaders"
-            OSL_DIST="$DIST"
+
           else
+
             echo "ERROR: stdosl.h was not found."
+
             echo
-            echo "Searching entire OSL tree:"
-            find "$SOURCE" "$BUILD" \
+            echo "Searching OSL source:"
+            find "$SOURCE" \
               -type f \
               -name stdosl.h \
               -print || true
+
+            echo
+            echo "Searching OSL build:"
+            find "$BUILD" \
+              -type f \
+              -name stdosl.h \
+              -print || true
+
+            exit 1
+
+          fi
+
+          # --------------------------------------------------------
+          # Verify selected locations.
+          # --------------------------------------------------------
+
+          if [ ! -d "$OSL_DIST" ]; then
+            echo "ERROR: Selected OSL distribution does not exist:"
+            echo "$OSL_DIST"
+            exit 1
+          fi
+
+          if [ ! -d "$OSL_SHADER_DIR" ]; then
+            echo "ERROR: Selected shader directory does not exist:"
+            echo "$OSL_SHADER_DIR"
+            exit 1
+          fi
+
+          if [ ! -f "$OSL_SHADER_DIR/stdosl.h" ]; then
+            echo "ERROR: stdosl.h does not exist:"
+            echo "$OSL_SHADER_DIR/stdosl.h"
             exit 1
           fi
 
           echo
-          echo "OSL distribution:"
+          echo "=========================================="
+          echo " OSL RESOURCE LOCATION FOUND"
+          echo "=========================================="
+
+          echo
+          echo "OSL_DIST:"
           echo "$OSL_DIST"
 
           echo
-          echo "OSL shader directory:"
+          echo "OSL_SHADER_DIR:"
           echo "$OSL_SHADER_DIR"
 
           echo
@@ -541,11 +657,14 @@ jobs:
 
           echo
           echo "OSL distribution contents:"
-          find "$OSL_DIST" \
-            -maxdepth 4 \
-            -type f \
-            | sort \
-            | head -200
+
+          if [ -d "$OSL_DIST" ]; then
+            find "$OSL_DIST" \
+              -maxdepth 6 \
+              -type f \
+              | sort \
+              | head -250
+          fi
 
           {
             echo "OSLC=$OSLC"
@@ -554,32 +673,57 @@ jobs:
           } >> "$GITHUB_ENV"
 
       # ============================================================
-      # Verify OSL executable dependencies
+      # VERIFY OSLC
       # ============================================================
 
-      - name: Verify oslc runtime dependencies
+      - name: Verify oslc
+        shell: bash
         run: |
-          set -eux
+          set -u
 
           echo "=========================================="
-          echo " Verifying oslc Runtime Dependencies"
+          echo " Verifying oslc"
           echo "=========================================="
+
+          if [ ! -x "$OSLC" ]; then
+            echo "ERROR: oslc is not executable:"
+            echo "$OSLC"
+            exit 1
+          fi
 
           echo "OSLC:"
           echo "$OSLC"
 
           echo
-          echo "ldd:"
+          echo "Runtime dependencies:"
+
           ldd "$OSLC" || true
 
           echo
-          echo "oslc help:"
-          "$OSLC" --help >/dev/null
+          echo "Testing oslc --help:"
 
+          set +e
+
+          "$OSLC" --help \
+            > "$GITHUB_WORKSPACE/oslc-help.txt" 2>&1
+
+          STATUS=$?
+
+          set -e
+
+          cat "$GITHUB_WORKSPACE/oslc-help.txt"
+
+          if [ "$STATUS" -ne 0 ]; then
+            echo
+            echo "ERROR: oslc could not start."
+            exit "$STATUS"
+          fi
+
+          echo
           echo "oslc launches successfully."
 
       # ============================================================
-      # Compile test OSL shader
+      # COMPILE TEST OSL SHADER
       # ============================================================
 
       - name: Compile test OSL shader
@@ -602,7 +746,7 @@ jobs:
           echo "$OSLC"
 
           echo
-          echo "Shader include directory:"
+          echo "Shader directory:"
           echo "$OSL_SHADER_DIR"
 
           echo
@@ -637,6 +781,7 @@ jobs:
           set -e
 
           if [ "$STATUS" -ne 0 ]; then
+
             echo
             echo "=========================================="
             echo " TEST OSL COMPILATION FAILED"
@@ -644,22 +789,27 @@ jobs:
 
             echo
             echo "========== TEST OUTPUT =========="
+
             cat "$LOG"
 
             echo
             echo "========== PATHS =========="
+
             echo "OSLC=$OSLC"
             echo "OSL_DIST=$OSL_DIST"
             echo "OSL_SHADER_DIR=$OSL_SHADER_DIR"
 
             echo
             echo "========== stdosl.h =========="
+
             ls -lh "$OSL_SHADER_DIR/stdosl.h"
 
             exit "$STATUS"
+
           fi
 
           if [ ! -f test.oso ]; then
+            echo
             echo "ERROR: oslc returned success but test.oso was not created."
             exit 1
           fi
@@ -672,10 +822,10 @@ jobs:
           ls -lh test.oso
 
       # ============================================================
-      # Final verification
+      # FINAL VERIFICATION
       # ============================================================
 
-      - name: Verify complete OSL bootstrap
+      - name: Final OSL verification
         run: |
           set -eux
 
@@ -685,6 +835,7 @@ jobs:
 
           test -x "$OSLC"
           test -d "$OSL_DIST"
+          test -d "$OSL_SHADER_DIR"
           test -f "$OSL_SHADER_DIR/stdosl.h"
           test -f "$GITHUB_WORKSPACE/osl-test/test.oso"
 
@@ -693,12 +844,16 @@ jobs:
           echo "$OSLC"
 
           echo
-          echo "OSL distribution:"
+          echo "OSL resource root:"
           echo "$OSL_DIST"
 
           echo
           echo "Shader directory:"
           echo "$OSL_SHADER_DIR"
+
+          echo
+          echo "stdosl.h:"
+          ls -lh "$OSL_SHADER_DIR/stdosl.h"
 
           echo
           echo "test.oso:"
@@ -710,7 +865,7 @@ jobs:
           echo "=========================================="
 
       # ============================================================
-      # Upload diagnostics
+      # DIAGNOSTICS
       # ============================================================
 
       - name: Upload OIIO, pybind11 and OSL diagnostics
@@ -727,9 +882,15 @@ jobs:
             osl-build.log
             osl-build
             osl-source/dist
+            osl-install.log
+            oslc-help.txt
             osl-test.log
             osl-test/test.oso
           if-no-files-found: warn
+
+      # ============================================================
+      # SUCCESS
+      # ============================================================
 
       - name: OSL bootstrap complete
         if: success()
@@ -748,7 +909,8 @@ jobs:
           echo "stdosl.h: FOUND"
           echo "test.oso: COMPILED"
           echo
-          echo "OSL distribution:"
+          echo "OSL resource root:"
           echo "$OSL_DIST"
           echo
-          echo "Next stage: integrate OSL into Blender Android build"
+          echo "OSL bootstrap stage is complete."
+          echo "Next stage: integrate OSL into Blender Android build."
