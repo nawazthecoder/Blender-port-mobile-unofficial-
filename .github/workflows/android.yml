@@ -1,1 +1,69 @@
+name: Blender 5.2.2 Android Bootstrap
 
+on:
+  workflow_dispatch:
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Show runner
+        run: |
+          uname -a
+          echo "CPU: $(nproc)"
+          free -h
+          df -h /
+
+      - name: Check Android toolchain
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_NDK=$ANDROID_NDK"
+          echo "ANDROID_NDK_LATEST_HOME=$ANDROID_NDK_LATEST_HOME"
+
+          "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++" \
+            --version
+
+      - name: Download Blender 5.2.2 source
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/src"
+          cd "$GITHUB_WORKSPACE/src"
+
+          curl -L --fail \
+            https://download.blender.org/source/blender-5.2.2.tar.xz \
+            -o blender-5.2.2.tar.xz
+
+          tar -xf blender-5.2.2.tar.xz
+
+          test -d blender-5.2.2
+          echo "Blender source:"
+          ls -la blender-5.2.2
+
+      - name: Verify Blender source
+        run: |
+          cd "$GITHUB_WORKSPACE/src/blender-5.2.2"
+
+          grep -n "BLENDER_VERSION" \
+            source/blender/blenkernel/BKE_blender_version.hh | head -5 || true
+
+          cmake --version
+          ninja --version
+          python3 --version
+
+      - name: Check ARM64 Android compiler
+        run: |
+          NDK="$ANDROID_NDK_LATEST_HOME"
+          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+
+          "$TOOLCHAIN/aarch64-linux-android-clang" \
+            --target=aarch64-linux-android \
+            --version
+
+      - name: Bootstrap complete
+        run: |
+          echo "=========================================="
+          echo "Blender 5.2.2 source: OK"
+          echo "Android NDK: OK"
+          echo "ARM64 compiler: OK"
+          echo "Next stage: Android CMake platform"
+          echo "=========================================="
