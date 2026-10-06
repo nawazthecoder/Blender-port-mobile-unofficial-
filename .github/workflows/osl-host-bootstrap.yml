@@ -45,6 +45,12 @@ jobs:
             llvm-18-dev \
             libclang-18-dev \
             libboost-dev \
+            libboost-thread-dev \
+            libboost-system-dev \
+            libboost-filesystem-dev \
+            libboost-atomic-dev \
+            libboost-chrono-dev \
+            libboost-date-time-dev \
             libopenexr-dev \
             libimath-dev \
             libpugixml-dev \
@@ -71,9 +77,6 @@ jobs:
           echo "Clang:"
           clang --version
 
-          echo "Clang++:"
-          clang++ --version
-
           echo "LLVM:"
           llvm-config --version
 
@@ -86,9 +89,15 @@ jobs:
           echo "Python:"
           python3 --version
 
-          echo "Clang TargetInfo header:"
+          echo "Clang TargetInfo:"
           test -f /usr/lib/llvm-18/include/clang/Basic/TargetInfo.h
           ls -lh /usr/lib/llvm-18/include/clang/Basic/TargetInfo.h
+
+          echo "Boost.Thread:"
+          ldconfig -p | grep boost_thread || true
+
+          test -f /usr/lib/x86_64-linux-gnu/libboost_thread.so
+          ls -lh /usr/lib/x86_64-linux-gnu/libboost_thread.so
 
           echo "iconvert:"
           command -v iconvert
@@ -173,13 +182,41 @@ jobs:
           set -eux
 
           BUILD="$GITHUB_WORKSPACE/oiio-build"
+          LOG="$GITHUB_WORKSPACE/oiio-build.log"
 
           echo "=========================================="
           echo " Building OpenImageIO 2.5.19.1"
           echo "=========================================="
 
+          set +e
+
           cmake --build "$BUILD" \
-            --parallel "$(nproc)"
+            --parallel "$(nproc)" \
+            > "$LOG" 2>&1
+
+          STATUS=$?
+
+          set -e
+
+          if [ "$STATUS" -ne 0 ]; then
+            echo "=========================================="
+            echo " OpenImageIO BUILD FAILED"
+            echo "=========================================="
+
+            echo "Important errors:"
+            grep -E \
+              "fatal error:|error:|undefined reference|FAILED:|ninja: build stopped" \
+              "$LOG" \
+              | tail -80 || true
+
+            echo
+            echo "Last 100 lines:"
+            tail -100 "$LOG"
+
+            exit "$STATUS"
+          fi
+
+          echo "OpenImageIO build completed successfully."
 
       - name: Install OpenImageIO
         run: |
@@ -204,11 +241,6 @@ jobs:
           test -d "$INSTALL/include"
           test -d "$INSTALL/lib"
 
-          echo "OIIO CMake package:"
-          find "$INSTALL" \
-            -name "OpenImageIOConfig.cmake" \
-            -print
-
           OIIO_CONFIG="$(
             find "$INSTALL" \
               -name "OpenImageIOConfig.cmake" \
@@ -218,6 +250,9 @@ jobs:
 
           test -n "$OIIO_CONFIG"
 
+          echo "OIIO CMake package:"
+          echo "$OIIO_CONFIG"
+
           echo "OIIO libraries:"
           find "$INSTALL" \
             \( \
@@ -225,6 +260,9 @@ jobs:
               -o -name "*OpenImageIO*.a" \
             \) \
             -print
+
+          echo "Checking OIIO Util dependencies:"
+          ldd "$INSTALL/lib/libOpenImageIO_Util.so.2.5.19" || true
 
       # ============================================================
       # pybind11 3.0.0
@@ -389,20 +427,67 @@ jobs:
             -DOSL_USE_OPTIX=OFF \
             -DSTOP_ON_WARNING=0 \
             -DOpenImageIO_ROOT="$OIIO" \
-            -Dpybind11_ROOT="$PYBIND11"
+            -Dpybind11_ROOT="$PYBIND11" \
+            -DCMAKE_EXE_LINKER_FLAGS="-lboost_thread"
+
+      # ============================================================
+      # OSL BUILD WITH COMPACT FAILURE OUTPUT
+      # ============================================================
 
       - name: Build OSL
+        shell: bash
         run: |
-          set -eux
+          set -u
+          set -o pipefail
 
           BUILD="$GITHUB_WORKSPACE/osl-build"
+          LOG="$GITHUB_WORKSPACE/osl-build.log"
 
           echo "=========================================="
           echo " Building OSL 1.15.3.0"
           echo "=========================================="
+          echo
+
+          set +e
 
           cmake --build "$BUILD" \
-            --parallel "$(nproc)"
+            --parallel "$(nproc)" \
+            > "$LOG" 2>&1
+
+          STATUS=$?
+
+          set -e
+
+          if [ "$STATUS" -ne 0 ]; then
+            echo
+            echo "=========================================="
+            echo " OSL BUILD FAILED"
+            echo "=========================================="
+            echo
+            echo "The full 1400+ line build log was saved to:"
+            echo "$LOG"
+            echo
+
+            echo "========== IMPORTANT ERROR LINES =========="
+            grep -E \
+              "fatal error:|undefined reference|collect2: error|error: |FAILED:|ninja: build stopped" \
+              "$LOG" \
+              | tail -100 || true
+
+            echo
+            echo "========== LAST 120 LINES =========="
+            tail -120 "$LOG"
+
+            exit "$STATUS"
+          fi
+
+          echo
+          echo "=========================================="
+          echo " OSL BUILD COMPLETED"
+          echo "=========================================="
+
+          echo "Build log:"
+          echo "$LOG"
 
       - name: Verify oslc
         run: |
@@ -416,7 +501,7 @@ jobs:
               -name oslc \
               -perm -111 \
               -print \
-              | head -1
+              -quit
           )"
 
           if [ -z "$OSLC" ]; then
@@ -444,8 +529,10 @@ jobs:
               -name oslc \
               -perm -111 \
               -print \
-              | head -1
+              -quit
           )"
+
+          test -n "$OSLC"
 
           mkdir -p "$GITHUB_WORKSPACE/osl-test"
 
@@ -471,16 +558,22 @@ jobs:
 
           ls -lh test.oso
 
+      # ============================================================
+      # Upload useful diagnostics
+      # ============================================================
+
       - name: Upload OIIO, pybind11 and OSL diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: oiio-2.5.19.1-pybind11-3.0.0-osl-1.15.3.0-host
           path: |
+            oiio-build.log
             oiio-build
             oiio-install
             pybind11-build
             pybind11-install
+            osl-build.log
             osl-build
             osl-test/test.oso
           if-no-files-found: warn
@@ -491,11 +584,14 @@ jobs:
           echo "=========================================="
           echo " OSL HOST BOOTSTRAP SUCCESS"
           echo "=========================================="
+          echo
           echo "OpenImageIO 2.5.19.1: BUILT"
           echo "pybind11 3.0.0: BUILT"
           echo "LLVM 18: AVAILABLE"
           echo "Clang 18 headers: AVAILABLE"
+          echo "Boost.Thread: AVAILABLE"
           echo "OSL 1.15.3.0: BUILT"
           echo "oslc: BUILT"
           echo "test.oso: COMPILED"
+          echo
           echo "Next stage: integrate OSL into Blender Android build"
