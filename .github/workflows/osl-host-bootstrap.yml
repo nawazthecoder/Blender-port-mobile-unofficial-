@@ -30,7 +30,7 @@ jobs:
           echo "=== DISK ==="
           df -h /
 
-      - name: Install OSL host build dependencies
+      - name: Install host build tools
         run: |
           set -eux
 
@@ -45,48 +45,52 @@ jobs:
             pkg-config \
             bison \
             flex \
+            clang \
+            llvm-dev \
             libboost-dev \
-            libopenimageio-dev \
             libopenexr-dev \
             libimath-dev \
             libpugixml-dev \
-            llvm-dev \
-            clang
+            libopenimageio-dev \
+            openimageio-tools
 
-      - name: Verify host dependencies
+      - name: Verify OpenImageIO
         run: |
           set -eux
 
-          echo "=== CMAKE ==="
-          cmake --version
+          echo "=== iconvert ==="
+          command -v iconvert
+          iconvert --help >/dev/null
 
           echo
-          echo "=== CLANG ==="
-          clang --version
+          echo "=== OpenImageIO development files ==="
 
-          echo
-          echo "=== LLVM CONFIG ==="
-          llvm-config --version
-
-          echo
-          echo "=== OIIO ==="
           pkg-config --modversion OpenImageIO || true
 
           echo
-          echo "=== IMATH ==="
-          pkg-config --modversion Imath || true
+          echo "=== OpenImageIO CMake package ==="
+
+          find /usr/lib \
+            -path '*cmake/OpenImageIO*' \
+            -maxdepth 5 \
+            -type f \
+            -print \
+            2>/dev/null | head -30
 
           echo
-          echo "=== PUGIXML ==="
-          pkg-config --modversion pugixml || true
+          echo "=== iconvert location ==="
+          ls -lh "$(command -v iconvert)"
+
+      - name: Verify LLVM
+        run: |
+          set -eux
+
+          echo "=== clang ==="
+          clang --version
 
           echo
-          echo "=== BISON ==="
-          bison --version | head -1
-
-          echo
-          echo "=== FLEX ==="
-          flex --version
+          echo "=== llvm-config ==="
+          llvm-config --version
 
       - name: Download OSL 1.15.3.0
         run: |
@@ -105,6 +109,8 @@ jobs:
 
           test -f "osl-${OSL_VERSION}.tar.gz"
 
+          rm -rf osl-source
+
           mkdir -p osl-source
 
           tar -xf \
@@ -116,7 +122,7 @@ jobs:
 
           echo "OSL source: OK"
 
-      - name: Configure OSL host build
+      - name: Configure OSL
         run: |
           set -eux
 
@@ -125,6 +131,10 @@ jobs:
 
           rm -rf "$BUILD"
           mkdir -p "$BUILD"
+
+          echo "=========================================="
+          echo " Configuring OSL 1.15.3.0"
+          echo "=========================================="
 
           cmake \
             -S "$SOURCE" \
@@ -135,12 +145,10 @@ jobs:
             -DOSL_BUILD_PLUGINS=OFF \
             -DOSL_BUILD_SHADERS=ON \
             -DOSL_BUILD_DOCS=OFF \
-            -DUSE_QT=OFF \
-            -DUSE_OPTIX=OFF \
             -DOSL_USE_OPTIX=OFF \
             -DSTOP_ON_WARNING=0
 
-      - name: Build OSL host
+      - name: Build OSL
         run: |
           set -eux
 
@@ -150,18 +158,13 @@ jobs:
             --build "$BUILD" \
             --parallel "$(nproc)"
 
-      - name: Verify host oslc
+      - name: Verify oslc
         run: |
           set -eux
 
           BUILD="$GITHUB_WORKSPACE/osl-build"
 
-          echo "=== SEARCH FOR OSLC ==="
-
-          find "$BUILD" \
-            -type f \
-            -name oslc \
-            -print
+          echo "=== Searching for oslc ==="
 
           OSLC="$(
             find "$BUILD" \
@@ -173,7 +176,7 @@ jobs:
           )"
 
           if [ -z "$OSLC" ]; then
-            echo "ERROR: host oslc was not built."
+            echo "ERROR: oslc was not built."
             exit 1
           fi
 
@@ -182,14 +185,11 @@ jobs:
           echo "$OSLC"
 
           echo
-          echo "=== OSLC HELP ==="
+          echo "=== OSLC TEST ==="
 
           "$OSLC" --help | head -80
 
-          echo
-          echo "Host OSL compiler: OK"
-
-      - name: Test oslc with a Blender-style shader
+      - name: Compile test OSL shader
         run: |
           set -eux
 
@@ -225,33 +225,33 @@ jobs:
           test -f test.oso
 
           echo
-          echo "Generated OSL object:"
+          echo "OSL shader compiled successfully:"
           ls -lh test.oso
 
-          echo
-          echo "OSL host compiler test: OK"
-
-      - name: Upload OSL host compiler
-        if: success()
+      - name: Upload OSL diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: osl-1.15.3.0-host
           path: |
-            osl-build/bin/oslc
+            osl-build
             osl-test/test.oso
-          if-no-files-found: error
+          if-no-files-found: warn
 
-      - name: OSL host bootstrap complete
+      - name: OSL bootstrap complete
         if: success()
         run: |
           echo
           echo "=========================================="
-          echo " OSL 1.15.3.0 HOST BOOTSTRAP COMPLETE"
+          echo " OSL 1.15.3.0 HOST BUILD COMPLETE"
           echo "=========================================="
           echo
-          echo "Host oslc:       FOUND"
-          echo "OSL compilation: OK"
+          echo "iconvert:        FOUND"
+          echo "OpenImageIO:     FOUND"
+          echo "LLVM:             FOUND"
+          echo "oslc:            FOUND"
+          echo "OSL shader test: PASSED"
           echo
           echo "Next stage:"
-          echo "Android-target OSL runtime + Blender integration"
+          echo "Android-target OSL integration"
           echo "=========================================="
