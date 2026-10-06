@@ -1,3 +1,4 @@
+
 name: Blender 5.2.2 Android - Python Bootstrap
 
 on:
@@ -34,26 +35,21 @@ jobs:
         run: |
           set -eux
 
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_NDK=$ANDROID_NDK"
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
-
           NDK="$ANDROID_NDK"
           TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 
           test -d "$NDK"
           test -x "$TOOLCHAIN/bin/clang"
 
-          echo
-          echo "=== NDK VERSION ==="
+          echo "=== NDK ==="
           cat "$NDK/source.properties"
 
           echo
-          echo "=== CLANG VERSION ==="
+          echo "=== CLANG ==="
           "$TOOLCHAIN/bin/clang" --version
 
           echo
-          echo "=== ARM64 ANDROID TARGET TEST ==="
+          echo "=== ARM64 TARGET ==="
 
           "$TOOLCHAIN/bin/clang" \
             --target=aarch64-linux-android29 \
@@ -65,12 +61,6 @@ jobs:
           echo
           echo "Android ARM64 compiler: OK"
 
-      - name: Check Java
-        run: |
-          set -eux
-
-          java -version
-
       - name: Check build tools
         run: |
           set -eux
@@ -80,8 +70,10 @@ jobs:
           python3 --version
           git --version
           curl --version | head -1
+          tar --version | head -1
+          unzip -v | head -2
 
-      - name: Determine Blender Python version
+      - name: Download Blender 5.2.2
         run: |
           set -eux
 
@@ -99,15 +91,15 @@ jobs:
 
           tar -xf blender-5.2.2.tar.xz
 
+          test -d blender-5.2.2
+
+      - name: Determine Blender Python version
+        run: |
+          set -eux
+
           SOURCE="$GITHUB_WORKSPACE/blender-source/blender-5.2.2"
 
-          test -d "$SOURCE"
-
-          echo "Blender source:"
-          echo "$SOURCE"
-
-          echo
-          echo "Searching for Python version..."
+          echo "=== Blender Python version ==="
 
           PYTHON_VERSION="$(
             sed -n \
@@ -121,13 +113,11 @@ jobs:
             exit 1
           fi
 
-          echo
-          echo "Blender Python version:"
-          echo "$PYTHON_VERSION"
+          echo "Blender Python version: $PYTHON_VERSION"
 
           echo "PYTHON_VERSION=$PYTHON_VERSION" >> "$GITHUB_ENV"
 
-      - name: Clone CPython 3.13 source
+      - name: Clone matching CPython
         run: |
           set -eux
 
@@ -143,42 +133,65 @@ jobs:
 
           cd cpython
 
-          echo
-          echo "=== CPYTHON VERSION ==="
+          echo "=== CPython version ==="
           git describe --tags --always
 
           echo
-          echo "=== SOURCE TREE ==="
-          ls -la | head -50
-
-          echo
-          echo "=== ANDROID DIRECTORY ==="
+          echo "=== Android build system ==="
 
           test -d Android
-          test -f Android/README.md
           test -f Android/android.py
+          test -f Android/README.md
 
-          ls -la Android
+          echo "CPython Android source: OK"
 
-          echo
-          echo "CPython Android build system: FOUND"
+      # ================================================================
+      # STEP 1: Build Python for the GitHub runner.
+      # ================================================================
 
-      - name: Inspect CPython Android build system
+      - name: CPython configure-build
         run: |
           set -eux
 
           cd "$GITHUB_WORKSPACE/cpython"
 
-          echo "=== ANDROID BUILD HELP ==="
+          echo "=========================================="
+          echo " CPython configure-build"
+          echo "=========================================="
 
-          python3 Android/android.py --help
+          python3 Android/android.py configure-build
 
           echo
-          echo "=== CONFIGURE-HOST HELP ==="
+          echo "=== BUILD DIRECTORY ==="
 
-          python3 Android/android.py configure-host --help
+          test -d cross-build/build
 
-      - name: Build CPython for Android ARM64
+          ls -la cross-build/build
+
+      - name: CPython make-build
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE/cpython"
+
+          echo "=========================================="
+          echo " CPython make-build"
+          echo "=========================================="
+
+          python3 Android/android.py make-build
+
+          echo
+          echo "=== BUILD PYTHON ==="
+
+          test -x cross-build/build/python
+
+          cross-build/build/python --version
+
+      # ================================================================
+      # STEP 2: Configure CPython for Android ARM64.
+      # ================================================================
+
+      - name: CPython configure-host
         run: |
           set -eux
 
@@ -186,30 +199,61 @@ jobs:
 
           HOST="aarch64-linux-android"
 
-          echo
           echo "=========================================="
-          echo " Building CPython $PYTHON_VERSION"
+          echo " CPython configure-host"
           echo " Target: $HOST"
           echo "=========================================="
-          echo
 
-          python3 Android/android.py build "$HOST"
+          python3 Android/android.py configure-host "$HOST"
+
+          echo
+          echo "=== HOST DIRECTORY ==="
+
+          test -d "cross-build/$HOST"
+
+          ls -la "cross-build/$HOST"
+
+      # ================================================================
+      # STEP 3: Build Android ARM64 Python.
+      # ================================================================
+
+      - name: CPython make-host
+        run: |
+          set -eux
+
+          cd "$GITHUB_WORKSPACE/cpython"
+
+          HOST="aarch64-linux-android"
+
+          echo "=========================================="
+          echo " CPython make-host"
+          echo " Target: $HOST"
+          echo "=========================================="
+
+          python3 Android/android.py make-host "$HOST"
+
+      # ================================================================
+      # Verify output.
+      # ================================================================
 
       - name: Verify Android Python
         run: |
           set -eux
 
-          PYTHON_DIR="$GITHUB_WORKSPACE/cpython/cross-build/aarch64-linux-android"
+          HOST="aarch64-linux-android"
+
+          PYTHON_DIR="$GITHUB_WORKSPACE/cpython/cross-build/$HOST"
           PREFIX="$PYTHON_DIR/prefix"
 
-          echo "Android Python build directory:"
-          echo "$PYTHON_DIR"
+          echo "=========================================="
+          echo " VERIFY ANDROID PYTHON"
+          echo "=========================================="
 
           test -d "$PYTHON_DIR"
           test -d "$PREFIX"
 
           echo
-          echo "=== PYTHON.H ==="
+          echo "=== Python.h ==="
 
           PYTHON_HEADER="$(
             find "$PREFIX" \
@@ -219,15 +263,15 @@ jobs:
           )"
 
           if [ -z "$PYTHON_HEADER" ]; then
-            echo "ERROR: Python.h was not produced."
+            echo "ERROR: Python.h not found."
             exit 1
           fi
 
-          echo "Python.h FOUND:"
+          echo "FOUND:"
           echo "$PYTHON_HEADER"
 
           echo
-          echo "=== PYTHON LIBRARY ==="
+          echo "=== libpython ==="
 
           PYTHON_LIBRARY="$(
             find "$PREFIX" \
@@ -242,11 +286,11 @@ jobs:
           )"
 
           if [ -z "$PYTHON_LIBRARY" ]; then
-            echo "ERROR: libpython was not produced."
+            echo "ERROR: libpython not found."
             exit 1
           fi
 
-          echo "Python library FOUND:"
+          echo "FOUND:"
           echo "$PYTHON_LIBRARY"
 
           echo
@@ -255,28 +299,28 @@ jobs:
           du -sh "$PREFIX"
 
           echo
-          echo "=== PREFIX CONTENTS ==="
+          echo "=== PREFIX ==="
 
           find "$PREFIX" -maxdepth 2 -type d | head -100
 
       - name: Package Android Python
-        if: success()
         run: |
           set -eux
 
           cd "$GITHUB_WORKSPACE/cpython"
 
-          python3 Android/android.py package aarch64-linux-android
+          HOST="aarch64-linux-android"
+
+          python3 Android/android.py package "$HOST"
 
           echo
-          echo "=== ANDROID PYTHON DISTRIBUTION ==="
+          echo "=== PACKAGE ==="
 
           find \
-            "$GITHUB_WORKSPACE/cpython/cross-build/aarch64-linux-android/dist" \
+            "cross-build/$HOST/dist" \
             -maxdepth 2 \
             -type f \
-            -print \
-            | head -100
+            -print
 
       - name: Upload Android Python
         if: success()
@@ -288,7 +332,7 @@ jobs:
             cpython/cross-build/aarch64-linux-android/dist
           if-no-files-found: error
 
-      - name: Python bootstrap complete
+      - name: Bootstrap complete
         if: success()
         run: |
           echo
@@ -296,10 +340,10 @@ jobs:
           echo " Android Python Bootstrap Complete"
           echo "=========================================="
           echo
-          echo "Python version:       $PYTHON_VERSION"
-          echo "Target:               aarch64-linux-android"
-          echo "Python.h:             FOUND"
-          echo "libpython:            FOUND"
+          echo "Python version: $PYTHON_VERSION"
+          echo "Target: aarch64-linux-android"
+          echo "Python.h: FOUND"
+          echo "libpython: FOUND"
           echo
           echo "Next stage:"
           echo "Connect Android Python to Blender 5.2.2"
