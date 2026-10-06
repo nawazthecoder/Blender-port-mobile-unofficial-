@@ -1,46 +1,85 @@
-name: Blender 5.2.2 Android Probe
+name: Blender 5.2.2 Android Port Probe
 
 on:
   workflow_dispatch:
 
 jobs:
-  probe:
+  android-probe:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Show runner
+      - name: Checkout our port
+        uses: actions/checkout@v4
+
+      - name: Show build environment
         run: |
-          echo "=== System ==="
+          set -eux
+
+          echo "=== SYSTEM ==="
           uname -a
-          echo "CPU: $(nproc)"
+          echo "CPU cores: $(nproc)"
           free -h
           df -h /
 
-      - name: Check Android toolchain
+      - name: Check Android NDK
         run: |
-          echo "ANDROID_NDK=$ANDROID_NDK"
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+          set -eux
 
           NDK="$ANDROID_NDK"
           TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 
+          test -d "$NDK"
           test -x "$TOOLCHAIN/bin/clang"
+
+          echo "=== NDK ==="
+          cat "$NDK/source.properties"
+
+          echo
+          echo "=== CLANG ==="
+          "$TOOLCHAIN/bin/clang" --version
+
+          echo
+          echo "=== ARM64 TARGET TEST ==="
 
           "$TOOLCHAIN/bin/clang" \
             --target=aarch64-linux-android29 \
-            --version
+            -### \
+            -x c \
+            -c /dev/null \
+            -o /tmp/test.o
 
+          echo
           echo "ARM64 Android compiler: OK"
 
       - name: Check build tools
         run: |
+          set -eux
+
           cmake --version
           ninja --version
           python3 --version
           git --version
+          curl --version | head -1
+
+      - name: Verify our Android platform file
+        run: |
+          set -eux
+
+          PLATFORM_FILE="build_files/cmake/platform/platform_android.cmake"
+
+          echo "Checking:"
+          echo "$PLATFORM_FILE"
+          echo
+
+          test -f "$PLATFORM_FILE"
+
+          echo "=== OUR ANDROID PLATFORM FILE ==="
+          cat "$PLATFORM_FILE"
 
       - name: Download Blender 5.2.2
         run: |
+          set -eux
+
           mkdir -p "$GITHUB_WORKSPACE/src"
           cd "$GITHUB_WORKSPACE/src"
 
@@ -48,55 +87,140 @@ jobs:
             "https://download.blender.org/source/blender-5.2.2.tar.xz" \
             -o blender-5.2.2.tar.xz
 
+          test -f blender-5.2.2.tar.xz
+
+          echo "Downloaded:"
+          ls -lh blender-5.2.2.tar.xz
+
           tar -xf blender-5.2.2.tar.xz
 
           test -d blender-5.2.2
 
+          echo
           echo "Blender source:"
-          pwd
           ls -la blender-5.2.2 | head -40
 
-      - name: Inspect Blender platform structure
+      - name: Install our Android platform file
         run: |
+          set -eux
+
+          SOURCE="$GITHUB_WORKSPACE/src/blender-5.2.2"
+          OUR_FILE="$GITHUB_WORKSPACE/build_files/cmake/platform/platform_android.cmake"
+          DEST="$SOURCE/build_files/cmake/platform/platform_android.cmake"
+
+          test -f "$OUR_FILE"
+
+          mkdir -p "$SOURCE/build_files/cmake/platform"
+
+          cp "$OUR_FILE" "$DEST"
+
+          test -f "$DEST"
+
+          echo "Installed our Android platform file:"
+          echo "$DEST"
+
+      - name: Patch Blender platform selection
+        run: |
+          set -eux
+
+          SOURCE="$GITHUB_WORKSPACE/src/blender-5.2.2"
+          CMAKE_FILE="$SOURCE/CMakeLists.txt"
+
+          cp "$CMAKE_FILE" "$CMAKE_FILE.original"
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path(
+              "/home/runner/work/"
+              + Path("/home/runner/work").glob("*").__next__().name
+              + "/"
+              + Path("/home/runner/work").glob("*").__next__().name
+              + "/src/blender-5.2.2/CMakeLists.txt"
+          )
+
+          text = path.read_text()
+
+          marker = """# ----------------------------------------------------------------------------
+          # Main Platform Checks
+          #
+          # - UNIX
+          # - WIN32
+          # - APPLE
+          """
+
+          if marker not in text:
+              raise SystemExit(
+                  "Could not find Blender's Main Platform Checks section."
+              )
+
+          old = """if(UNIX AND NOT APPLE)
+          include(build_files/cmake/platform/platform_unix.cmake)
+          elseif(WIN32)
+          include(build_files/cmake/platform/platform_win32.cmake)
+          elseif(APPLE)
+          include(build_files/cmake/platform/platform_apple.cmake)
+          endif()
+          """
+
+          new = """if(ANDROID)
+          include(build_files/cmake/platform/platform_android.cmake)
+          elseif(UNIX AND NOT APPLE)
+          include(build_files/cmake/platform/platform_unix.cmake)
+          elseif(WIN32)
+          include(build_files/cmake/platform/platform_win32.cmake)
+          elseif(APPLE)
+          include(build_files/cmake/platform/platform_apple.cmake)
+          endif()
+          """
+
+          if old not in text:
+              raise SystemExit(
+                  "Could not find the expected platform-selection block."
+              )
+
+          path.write_text(text.replace(old, new, 1))
+
+          print("CMakeLists.txt patched successfully.")
+          PY
+
+      - name: Verify Blender Android source modifications
+        run: |
+          set -eux
+
           SOURCE="$GITHUB_WORKSPACE/src/blender-5.2.2"
 
-          echo "=== Platform CMake files ==="
-          find "$SOURCE/build_files/cmake/platform" \
-            -maxdepth 1 \
-            -type f \
-            -printf '%f\n' | sort
+          echo "=== Android platform file ==="
+          test -f \
+            "$SOURCE/build_files/cmake/platform/platform_android.cmake"
+
+          grep -n \
+            "Configuring Blender for Android" \
+            "$SOURCE/build_files/cmake/platform/platform_android.cmake"
 
           echo
-          echo "=== GHOST platform files ==="
-          find "$SOURCE/intern/ghost" \
-            -type f \
-            | grep -E '/(system|window|context)' \
-            | head -100 || true
+          echo "=== Android CMake selection ==="
 
-          echo
-          echo "=== Android references ==="
-          grep -Rni --exclude-dir=.git \
-            -E 'ANDROID|Android|ANativeWindow|android_surface|EGL' \
-            "$SOURCE/intern/ghost" \
-            "$SOURCE/build_files/cmake" \
-            | head -100 || true
+          grep -n -A8 -B3 \
+            "platform_android.cmake" \
+            "$SOURCE/CMakeLists.txt"
 
-      - name: Configure Android probe
+      - name: Configure Blender for Android
         continue-on-error: true
         run: |
+          set -o pipefail
+
           SOURCE="$GITHUB_WORKSPACE/src/blender-5.2.2"
-          BUILD="$GITHUB_WORKSPACE/build-android-probe"
+          BUILD="$GITHUB_WORKSPACE/build-android"
 
           rm -rf "$BUILD"
           mkdir -p "$BUILD"
 
           cd "$BUILD"
 
-          "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" \
-            --version
-
-          echo
-          echo "=== Starting CMake Android probe ==="
+          echo "=========================================="
+          echo " Blender 5.2.2 Android Configure"
+          echo "=========================================="
           echo
 
           cmake -G Ninja \
@@ -107,31 +231,57 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DWITH_GHOST_X11=OFF \
             -DWITH_GHOST_WAYLAND=OFF \
-            -DWITH_GHOST_SDL=ON \
+            -DWITH_GHOST_SDL=OFF \
             -DWITH_HEADLESS=OFF \
-            "$SOURCE" \
-            2>&1 | tee cmake-probe.log
+            -DWITH_VULKAN_BACKEND=ON \
+            -DWITH_OPENGL_BACKEND=OFF \
+            -DWITH_LIBS_PRECOMPILED=OFF \
+            "$SOURCE" 2>&1 | tee cmake-android.log
 
-      - name: Show probe result
+      - name: Show configure result
         if: always()
         run: |
-          LOG="$GITHUB_WORKSPACE/build-android-probe/cmake-probe.log"
+          LOG="$GITHUB_WORKSPACE/build-android/cmake-android.log"
 
+          echo
           echo "=========================================="
-          echo " Android Configure Probe Result"
+          echo " CONFIGURE RESULT"
           echo "=========================================="
 
           if [ -f "$LOG" ]; then
-            echo
-            echo "=== Last 200 lines ==="
-            tail -200 "$LOG"
 
             echo
-            echo "=== CMake errors ==="
+            echo "=== ANDROID PLATFORM MESSAGES ==="
+
             grep -n -E \
-              'CMake Error|error:|Error|FAILED|not found|NOTFOUND|unsupported|Unsupported' \
+              "Configuring Blender for Android|Android platform configuration loaded|Android ABI|Android API" \
+              "$LOG" || true
+
+            echo
+            echo "=== IMPORTANT ERRORS ==="
+
+            grep -n -E \
+              "CMake Error|Could NOT find|NOTFOUND|not found|unsupported|Unsupported|error:" \
               "$LOG" \
               | tail -100 || true
+
+            echo
+            echo "=== LAST 250 LINES ==="
+
+            tail -250 "$LOG"
+
           else
             echo "No CMake log was produced."
           fi
+
+      - name: Upload configure diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blender-5.2.2-android-configure
+          path: |
+            build-android/cmake-android.log
+            src/blender-5.2.2/CMakeLists.txt.original
+            src/blender-5.2.2/CMakeLists.txt
+            src/blender-5.2.2/build_files/cmake/platform/platform_android.cmake
+          if-no-files-found: warn
