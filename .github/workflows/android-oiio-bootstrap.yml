@@ -1,0 +1,230 @@
+name: Android ARM64 - OpenImageIO Bootstrap
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/android-oiio-bootstrap.yml"
+
+# Blender 5.2.2 pins OpenImageIO v3.1.13.1.
+# This workflow creates an Android arm64-v8a dependency bundle suitable for
+# feeding into the native Blender Android build later.
+
+env:
+  ANDROID_API: "29"
+  ANDROID_NDK_VERSION: "27.3.13750724"
+  OIIO_VERSION: "v3.1.13.1"
+  CMAKE_BUILD_PARALLEL_LEVEL: "2"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ""
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            pkg-config \
+            curl \
+            unzip \
+            xz-utils \
+            bzip2 \
+            file \
+            binutils
+
+      - name: Install Android platform and NDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          sdkmanager \
+            --sdk_root="$ANDROID_SDK_ROOT" \
+            "platform-tools" \
+            "platforms;android-${ANDROID_API}" \
+            "ndk;${ANDROID_NDK_VERSION}"
+
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Prepare directories
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          rm -rf "$GITHUB_WORKSPACE/android-oiio"
+          mkdir -p "$GITHUB_WORKSPACE/android-oiio"/{src,build,logs,prefix,package}
+
+          echo "OIIO_ROOT=$GITHUB_WORKSPACE/android-oiio/src/OpenImageIO" >> "$GITHUB_ENV"
+          echo "PREFIX=$GITHUB_WORKSPACE/android-oiio/prefix" >> "$GITHUB_ENV"
+          echo "BUILD=$GITHUB_WORKSPACE/android-oiio/build" >> "$GITHUB_ENV"
+          echo "LOGS=$GITHUB_WORKSPACE/android-oiio/logs" >> "$GITHUB_ENV"
+
+      - name: Download OpenImageIO 3.1.13.1
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd "$GITHUB_WORKSPACE/android-oiio/src"
+
+          curl -L --fail --retry 5 \
+            -o openimageio.tar.gz \
+            "https://github.com/AcademySoftwareFoundation/OpenImageIO/archive/refs/tags/${OIIO_VERSION}.tar.gz"
+
+          tar -xzf openimageio.tar.gz
+          mv "OpenImageIO-${OIIO_VERSION#v}" OpenImageIO
+
+          test -f "$OIIO_ROOT/CMakeLists.txt"
+          grep -E 'project\(|VERSION ' "$OIIO_ROOT/CMakeLists.txt" | head -n 5 || true
+
+      - name: Configure Android OpenImageIO
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          TOOLCHAIN="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake"
+
+          cmake -S "$OIIO_ROOT" -B "$BUILD/openimageio" -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_STANDARD=11 \
+            -DCMAKE_CXX_STANDARD=17 \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_PREFIX_PATH="$PREFIX" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DLINKSTATIC=ON \
+            -DOpenImageIO_BUILD_MISSING_DEPS=all \
+            -DEMBEDPLUGINS=ON \
+            -DOIIO_BUILD_TOOLS=OFF \
+            -DOIIO_BUILD_TESTS=OFF \
+            -DBUILD_TESTING=OFF \
+            -DBUILD_DOCS=OFF \
+            -DINSTALL_DOCS=OFF \
+            -DINSTALL_FONTS=ON \
+            -DUSE_OPENGL=OFF \
+            -DUSE_QT=OFF \
+            -DUSE_PYTHON=OFF \
+            -DUSE_TBB=OFF \
+            -DUSE_LIBHEIF=OFF \
+            -DUSE_OPENJPEG=OFF \
+            -DUSE_WEBP=OFF \
+            -DUSE_JXL=OFF \
+            -DUSE_OPENVDB=OFF \
+            -DUSE_FFMPEG=OFF \
+            -DUSE_FREETYPE=OFF \
+            -DUSE_OPENCV=OFF \
+            -DUSE_DCMTK=OFF \
+            -DUSE_LIBRAW=OFF \
+            -DUSE_NUKE=OFF \
+            -DUSE_PTEX=OFF \
+            -DUSE_GIF=OFF \
+            -DUSE_OPENCOLORIO=ON \
+            2>&1 | tee "$LOGS/oiio-configure.log"
+
+      - name: Build OpenImageIO
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --build "$BUILD/openimageio" --parallel 2 2>&1 | tee "$LOGS/oiio-build.log"
+
+      - name: Install OpenImageIO
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --install "$BUILD/openimageio" 2>&1 | tee "$LOGS/oiio-install.log"
+
+      - name: Verify Android ARM64 static libraries
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          test -f "$PREFIX/lib/libOpenImageIO.a"
+          test -f "$PREFIX/lib/libOpenImageIO_Util.a"
+
+          verify_archive() {
+            local archive="$1"
+            local member
+            local tmpobj
+
+            member="$(ar t "$archive" | head -n 1)"
+            test -n "$member"
+
+            tmpobj="$(mktemp)"
+            ar p "$archive" "$member" > "$tmpobj"
+
+            echo "Checking: $archive"
+            readelf -h "$tmpobj" | grep -E 'Class:.*ELF64'
+            readelf -h "$tmpobj" | grep -E 'Machine:.*AArch64'
+
+            rm -f "$tmpobj"
+          }
+
+          verify_archive "$PREFIX/lib/libOpenImageIO.a"
+          verify_archive "$PREFIX/lib/libOpenImageIO_Util.a"
+
+          test -d "$PREFIX/include/OpenImageIO"
+
+          grep -R "OPENIMAGEIO_VERSION" "$PREFIX/include/OpenImageIO" 2>/dev/null | head -n 5 || true
+
+      - name: Write dependency manifest
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          {
+            echo "Blender target: 5.2.2"
+            echo "OpenImageIO: ${OIIO_VERSION}"
+            echo "Android ABI: arm64-v8a"
+            echo "Android API: ${ANDROID_API}"
+            echo "Android NDK: ${ANDROID_NDK_VERSION}"
+            echo "Build type: Release"
+            echo "Libraries: static"
+            echo "GPU backend: not applicable (image I/O dependency)"
+            echo "OpenColorIO: enabled"
+            echo "Python bindings: disabled for this first Android dependency bootstrap"
+            echo "Optional image codecs disabled: TBB, Libheif, OpenJPEG, WebP, JPEG-XL, FFmpeg, OpenVDB, FreeType, OpenCV, DCMTK, LibRaw, Nuke, PTEX, GIF"
+          } > "$GITHUB_WORKSPACE/android-oiio/manifest.txt"
+
+          cat "$GITHUB_WORKSPACE/android-oiio/manifest.txt"
+
+      - name: Package OpenImageIO bundle
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          mkdir -p "$GITHUB_WORKSPACE/android-oiio/package"
+
+          tar -C "$GITHUB_WORKSPACE/android-oiio" \
+            -czf "$GITHUB_WORKSPACE/android-oiio/package/openimageio-android-arm64-blender-5.2.2.tar.gz" \
+            prefix manifest.txt
+
+      - name: Upload Android ARM64 OIIO bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: openimageio-android-arm64-blender-5.2.2
+          path: |
+            android-oiio/package/openimageio-android-arm64-blender-5.2.2.tar.gz
+            android-oiio/manifest.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-oiio-build-logs
+          path: android-oiio/logs
+          if-no-files-found: warn
+          retention-days: 14
