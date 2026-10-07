@@ -217,6 +217,15 @@ jobs:
           test -f "$PREFIX/lib/cmake/Imath/ImathConfig.cmake" || \
             find "$PREFIX" -name 'ImathConfig.cmake' -print -quit
 
+      - name: Patch OpenEXR for Android cross-compile
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if [ -f "$SRC/openexr/src/test/OpenEXRTest/main.cpp" ]; then
+            grep -q '#include <sys/stat.h>' "$SRC/openexr/src/test/OpenEXRTest/main.cpp" || \
+              sed -i '1i #include <sys/stat.h>' "$SRC/openexr/src/test/OpenEXRTest/main.cpp"
+          fi
+
       - name: Build OpenEXR
         shell: bash
         run: |
@@ -232,6 +241,7 @@ jobs:
             -DImath_DIR="$PREFIX/lib/cmake/Imath" \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTING=OFF \
             -DOPENEXR_BUILD_TESTS=OFF \
             -DOPENEXR_BUILD_TOOLS=OFF \
             -DOPENEXR_INSTALL_TOOLS=OFF \
@@ -409,7 +419,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DCMAKE_INSTALL_LIBDIR=lib \
             -DCMAKE_PREFIX_PATH="$PREFIX" \
-            -DOpenImageIO_BUILD_MISSING_DEPS=\"\" \
+            -DOpenImageIO_BUILD_MISSING_DEPS="" \
             -DBUILD_SHARED_LIBS=OFF \
             -DLINKSTATIC=ON \
             -DEMBEDPLUGINS=ON \
