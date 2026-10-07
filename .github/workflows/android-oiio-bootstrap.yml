@@ -10,21 +10,18 @@ env:
   ANDROID_API: "29"
   ANDROID_NDK_VERSION: "27.3.13750724"
 
+  # Blender 5.2.2 dependency set
   OIIO_VERSION: "v3.1.13.1"
-  IMATH_VERSION: "3.2.2"
-  OPENEXR_VERSION: "3.4.10"
-  OPENJPH_VERSION: "0.25.2"
-  DEFLATE_VERSION: "1.18"
-
-  OPENCOLORIO_VERSION: "2.5.0"
+  IMATH_VERSION: "v3.2.2"
+  OPENEXR_VERSION: "v3.4.10"
+  OPENCOLORIO_VERSION: "v2.5.0"
   FMT_VERSION: "12.1.0"
   ROBINMAP_VERSION: "v1.3.0"
-  PUGIXML_VERSION: "1.10"
 
-  ZLIB_VERSION: "1.3.1"
-  PNG_VERSION: "1.6.50"
+  ZLIB_VERSION: "v1.3.1"
+  PNG_VERSION: "v1.6.50"
   JPEG_VERSION: "3.1.0"
-  TIFF_VERSION: "4.7.1"
+  TIFF_VERSION: "v4.7.1"
 
   CMAKE_BUILD_PARALLEL_LEVEL: "2"
 
@@ -42,22 +39,23 @@ jobs:
         with:
           packages: ""
 
-      - name: Install tools
+      - name: Install host tools
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            ninja-build \
             cmake \
+            ninja-build \
             curl \
             unzip \
             xz-utils \
             file \
-            binutils
+            binutils \
+            pkg-config
 
       - name: Install Android NDK
         shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
           sdkmanager \
             --sdk_root="$ANDROID_SDK_ROOT" \
@@ -70,7 +68,7 @@ jobs:
       - name: Prepare directories
         shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
           rm -rf android-oiio
 
@@ -88,311 +86,355 @@ jobs:
 
           echo "TOOLCHAIN=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" >> "$GITHUB_ENV"
 
-      # ------------------------------------------------------------
-      # DOWNLOAD
-      # ------------------------------------------------------------
-
       - name: Download dependencies
         shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
+
           cd "$SRC"
 
-          git clone --depth 1 --branch "v${IMATH_VERSION}" \
-            https://github.com/AcademySoftwareFoundation/Imath.git imath
+          git clone --depth 1 --branch "$IMATH_VERSION" \
+            https://github.com/AcademySoftwareFoundation/Imath.git \
+            imath
 
-          git clone --depth 1 --branch "v${OPENEXR_VERSION}" \
-            https://github.com/AcademySoftwareFoundation/openexr.git openexr
+          git clone --depth 1 --branch "$OPENEXR_VERSION" \
+            https://github.com/AcademySoftwareFoundation/openexr.git \
+            openexr
 
-          git clone --depth 1 --branch "${OIIO_VERSION}" \
-            https://github.com/AcademySoftwareFoundation/OpenImageIO.git OpenImageIO
+          git clone --depth 1 --branch "$OIIO_VERSION" \
+            https://github.com/AcademySoftwareFoundation/OpenImageIO.git \
+            OpenImageIO
 
-          git clone --depth 1 --branch "v${OPENCOLORIO_VERSION}" \
-            https://github.com/AcademySoftwareFoundation/OpenColorIO.git opencolorio
+          git clone --depth 1 --branch "$OPENCOLORIO_VERSION" \
+            https://github.com/AcademySoftwareFoundation/OpenColorIO.git \
+            opencolorio
 
-          git clone --depth 1 --branch "${FMT_VERSION}" \
-            https://github.com/fmtlib/fmt.git fmt
+          git clone --depth 1 --branch "$FMT_VERSION" \
+            https://github.com/fmtlib/fmt.git \
+            fmt
 
-          git clone --depth 1 --branch "${PUGIXML_VERSION}" \
-            https://github.com/zeux/pugixml.git pugixml
+          git clone --depth 1 --branch "$ROBINMAP_VERSION" \
+            https://github.com/Tessil/robin-map.git \
+            robinmap
 
-          git clone --depth 1 --branch "${ROBINMAP_VERSION}" \
-            https://github.com/Tessil/robin-map.git robinmap
+          git clone --depth 1 --branch "$ZLIB_VERSION" \
+            https://github.com/madler/zlib.git \
+            zlib
 
-          git clone --depth 1 --branch "v${OPENJPH_VERSION}" \
-            https://github.com/aous72/OpenJPH.git openjph
+          git clone --depth 1 --branch "$PNG_VERSION" \
+            https://github.com/pnggroup/libpng.git \
+            png
 
-          git clone --depth 1 --branch "v${DEFLATE_VERSION}" \
-            https://github.com/ebiggers/libdeflate.git deflate
+          git clone --depth 1 --branch "$JPEG_VERSION" \
+            https://github.com/libjpeg-turbo/libjpeg-turbo.git \
+            jpeg
 
-          git clone --depth 1 --branch "v${ZLIB_VERSION}" \
-            https://github.com/madler/zlib.git zlib
+          git clone --depth 1 --branch "$TIFF_VERSION" \
+            https://gitlab.com/libtiff/libtiff.git \
+            tiff
 
-          git clone --depth 1 --branch "${JPEG_VERSION}" \
-            https://github.com/libjpeg-turbo/libjpeg-turbo.git jpeg
+      - name: Show revisions
+        shell: bash
+        run: |
+          set -eux
 
-          git clone --depth 1 --branch "v${TIFF_VERSION}" \
-            https://gitlab.com/libtiff/libtiff.git tiff
+          cd "$SRC"
 
-      # ------------------------------------------------------------
-      # HELPER
-      # ------------------------------------------------------------
+          for d in \
+            imath \
+            openexr \
+            OpenImageIO \
+            opencolorio \
+            fmt \
+            robinmap \
+            zlib \
+            png \
+            jpeg \
+            tiff
+          do
+            echo
+            echo "===== $d ====="
+            git -C "$d" rev-parse HEAD
+            git -C "$d" describe --tags --always || true
+          done
 
       - name: Build zlib
         shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
-          cmake -S "$SRC/zlib" -B "$BUILD/zlib" -G Ninja \
+          cmake \
+            -S "$SRC/zlib" \
+            -B "$BUILD/zlib" \
+            -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DANDROID_STL=c++_static \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DBUILD_SHARED_LIBS=OFF
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DZLIB_BUILD_TESTING=OFF \
+            2>&1 | tee "$LOGS/zlib-configure.log"
 
-          cmake --build "$BUILD/zlib" --parallel 2
-          cmake --install "$BUILD/zlib"
+          cmake --build "$BUILD/zlib" \
+            --target install \
+            2>&1 | tee "$LOGS/zlib-build.log"
 
-      - name: Build libjpeg
+      - name: Build libpng
         shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
-          cmake -S "$SRC/jpeg" -B "$BUILD/jpeg" -G Ninja \
+          cmake \
+            -S "$SRC/png" \
+            -B "$BUILD/png" \
+            -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DANDROID_STL=c++_static \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DWITH_TURBOJPEG=OFF \
-            -DWITH_TESTS=OFF \
-            -DWITH_TOOLS=OFF
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DPNG_SHARED=OFF \
+            -DPNG_STATIC=ON \
+            -DPNG_TESTS=OFF \
+            -DPNG_TOOLS=OFF \
+            2>&1 | tee "$LOGS/png-configure.log"
 
-          cmake --build "$BUILD/jpeg" --parallel 2
-          cmake --install "$BUILD/jpeg"
+          cmake --build "$BUILD/png" \
+            --target install \
+            2>&1 | tee "$LOGS/png-build.log"
+
+      - name: Build libjpeg-turbo
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cmake \
+            -S "$SRC/jpeg" \
+            -B "$BUILD/jpeg" \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DANDROID_STL=c++_static \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DENABLE_SHARED=OFF \
+            -DENABLE_STATIC=ON \
+            -DWITH_TURBOJPEG=OFF \
+            -DWITH_TEST=OFF \
+            2>&1 | tee "$LOGS/jpeg-configure.log"
+
+          cmake --build "$BUILD/jpeg" \
+            --target install \
+            2>&1 | tee "$LOGS/jpeg-build.log"
 
       - name: Build libtiff
         shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
-          cmake -S "$SRC/tiff" -B "$BUILD/tiff" -G Ninja \
+          cmake \
+            -S "$SRC/tiff" \
+            -B "$BUILD/tiff" \
+            -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DANDROID_STL=c++_static \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DCMAKE_PREFIX_PATH="$PREFIX" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
             -Dtiff-tools=OFF \
             -Dtiff-tests=OFF \
-            -Dtiff-docs=OFF \
+            -Dtiff-contrib=OFF \
             -Djbig=OFF \
-            -Dlzma=OFF \
+            -Djpeg=ON \
+            -Dwebp=OFF \
             -Dzstd=OFF \
-            -Dwebp=OFF
+            -Dlzma=OFF \
+            -DLERC=OFF \
+            2>&1 | tee "$LOGS/tiff-configure.log"
 
-          cmake --build "$BUILD/tiff" --parallel 2
-          cmake --install "$BUILD/tiff"
-
-      # ------------------------------------------------------------
-      # IMATH
-      # ------------------------------------------------------------
+          cmake --build "$BUILD/tiff" \
+            --target install \
+            2>&1 | tee "$LOGS/tiff-build.log"
 
       - name: Build Imath
         shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
-          cmake -S "$SRC/imath" -B "$BUILD/imath" -G Ninja \
+          cmake \
+            -S "$SRC/imath" \
+            -B "$BUILD/imath" \
+            -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DANDROID_STL=c++_static \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
             -DIMATH_BUILD_TESTS=OFF \
-            -DIMATH_BUILD_EXAMPLES=OFF \
-            -DPYTHON=OFF \
-            -DPYBIND11=OFF
+            -DIMATH_INSTALL_PKG_CONFIG=OFF \
+            2>&1 | tee "$LOGS/imath-configure.log"
 
-          cmake --build "$BUILD/imath" --parallel 2
-          cmake --install "$BUILD/imath"
-
-          test -f "$PREFIX/lib/cmake/Imath/ImathConfig.cmake"
-
-      # ------------------------------------------------------------
-      # OPENJPH
-      # ------------------------------------------------------------
-
-      - name: Build OpenJPH
-        shell: bash
-        run: |
-          set -eux
-
-          cmake -S "$SRC/openjph" -B "$BUILD/openjph" -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM="android-${ANDROID_API}" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DOJPH_BUILD_EXECUTABLES=OFF \
-            -DOJPH_BUILD_TESTS=OFF
-
-          cmake --build "$BUILD/openjph" --parallel 2
-          cmake --install "$BUILD/openjph"
-
-      # ------------------------------------------------------------
-      # LIBDEFLATE
-      # ------------------------------------------------------------
-
-      - name: Build libdeflate
-        shell: bash
-        run: |
-          set -eux
-
-          cmake -S "$SRC/deflate" -B "$BUILD/deflate" -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM="android-${ANDROID_API}" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DLIBDEFLATE_BUILD_STATIC_LIB=ON \
-            -DLIBDEFLATE_BUILD_SHARED_LIB=OFF \
-            -DLIBDEFLATE_BUILD_GZIP=OFF \
-            -DLIBDEFLATE_BUILD_TESTS=OFF
-
-          cmake --build "$BUILD/deflate" --parallel 2
-          cmake --install "$BUILD/deflate"
-
-      # ------------------------------------------------------------
-      # OPENEXR
-      # ------------------------------------------------------------
+          cmake --build "$BUILD/imath" \
+            --target install \
+            2>&1 | tee "$LOGS/imath-build.log"
 
       - name: Build OpenEXR
         shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
-          cmake -S "$SRC/openexr" -B "$BUILD/openexr" -G Ninja \
+          cmake \
+            -S "$SRC/openexr" \
+            -B "$BUILD/openexr" \
+            -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DANDROID_STL=c++_static \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DCMAKE_PREFIX_PATH="$PREFIX" \
-            -DImath_DIR="$PREFIX/lib/cmake/Imath" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
             -DOPENEXR_BUILD_TESTS=OFF \
             -DOPENEXR_BUILD_TOOLS=OFF \
             -DOPENEXR_BUILD_EXAMPLES=OFF \
             -DOPENEXR_BUILD_PYTHON=OFF \
-            -DOPENEXR_USE_TBB=OFF
+            -DOPENEXR_FORCE_INTERNAL_OPENJPH=ON \
+            -DOPENEXR_FORCE_INTERNAL_DEFLATE=ON \
+            -DImath_DIR="$PREFIX/lib/cmake/Imath" \
+            2>&1 | tee "$LOGS/openexr-configure.log"
 
-          cmake --build "$BUILD/openexr" --parallel 2
-          cmake --install "$BUILD/openexr"
-
-      # ------------------------------------------------------------
-      # FMT
-      # ------------------------------------------------------------
+          cmake --build "$BUILD/openexr" \
+            --target install \
+            2>&1 | tee "$LOGS/openexr-build.log"
 
       - name: Build fmt
         shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
-          cmake -S "$SRC/fmt" -B "$BUILD/fmt" -G Ninja \
+          cmake \
+            -S "$SRC/fmt" \
+            -B "$BUILD/fmt" \
+            -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DANDROID_STL=c++_static \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
             -DFMT_TEST=OFF \
-            -DFMT_DOC=OFF
+            -DFMT_DOC=OFF \
+            2>&1 | tee "$LOGS/fmt-configure.log"
 
-          cmake --build "$BUILD/fmt" --parallel 2
-          cmake --install "$BUILD/fmt"
+          cmake --build "$BUILD/fmt" \
+            --target install \
+            2>&1 | tee "$LOGS/fmt-build.log"
 
-      # ------------------------------------------------------------
-      # PUGIXML + ROBINMAP
-      # ------------------------------------------------------------
-
-      - name: Build pugixml
+      - name: Install Robin-map headers
         shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
-          cmake -S "$SRC/pugixml" -B "$BUILD/pugixml" -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM="android-${ANDROID_API}" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DPUGIXML_BUILD_TESTS=OFF
+          mkdir -p "$PREFIX/include/tsl"
 
-          cmake --build "$BUILD/pugixml" --parallel 2
-          cmake --install "$BUILD/pugixml"
+          cp "$SRC/robinmap/include/tsl/robin_map.h" \
+            "$PREFIX/include/tsl/"
 
-      - name: Install robin-map
-        shell: bash
-        run: |
-          set -eux
-
-          mkdir -p "$PREFIX/include"
-          cp -a "$SRC/robinmap/include/tsl" "$PREFIX/include/"
-
-      # ------------------------------------------------------------
-      # OPENCOLORIO
-      # ------------------------------------------------------------
+          cp "$SRC/robinmap/include/tsl/robin_set.h" \
+            "$PREFIX/include/tsl/"
 
       - name: Build OpenColorIO
         shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
-          cmake -S "$SRC/opencolorio" -B "$BUILD/ocio" -G Ninja \
+          cmake \
+            -S "$SRC/opencolorio" \
+            -B "$BUILD/opencolorio" \
+            -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DANDROID_STL=c++_static \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DCMAKE_PREFIX_PATH="$PREFIX" \
-            -DImath_ROOT="$PREFIX" \
-            -DOCIO_INSTALL_EXT_PACKAGES=NONE \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DOCIO_INSTALL_EXT_PACKAGES=MISSING \
             -DOCIO_BUILD_APPS=OFF \
-            -DOCIO_BUILD_TESTS=OFF \
             -DOCIO_BUILD_PYTHON=OFF \
-            -DOCIO_BUILD_DOCS=OFF
+            -DOCIO_BUILD_TESTS=OFF \
+            -DOCIO_BUILD_GPU_TESTS=OFF \
+            -DOCIO_BUILD_DOCS=OFF \
+            -DOCIO_BUILD_OPENFX=OFF \
+            -DOCIO_USE_OPENGL=OFF \
+            -DImath_DIR="$PREFIX/lib/cmake/Imath" \
+            -DZLIB_USE_STATIC_LIBS=ON \
+            -DZLIB_ROOT="$PREFIX" \
+            2>&1 | tee "$LOGS/opencolorio-configure.log"
 
-          cmake --build "$BUILD/ocio" --parallel 2
-          cmake --install "$BUILD/ocio"
+          cmake --build "$BUILD/opencolorio" \
+            --target install \
+            2>&1 | tee "$LOGS/opencolorio-build.log"
 
-      # ------------------------------------------------------------
-      # OPENIMAGEIO
-      # ------------------------------------------------------------
+          # OCIO keeps automatically-built dependency libraries under ext/dist.
+          # Copy them into our final Android prefix so later Blender linking
+          # does not depend on the temporary OCIO build directory.
+          if [ -d "$BUILD/opencolorio/ext/dist" ]; then
+            cp -a "$BUILD/opencolorio/ext/dist/." "$PREFIX/"
+          fi
 
       - name: Configure OpenImageIO
         shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
-          cmake -S "$SRC/OpenImageIO" -B "$BUILD/oiio" -G Ninja \
+          cmake \
+            -S "$SRC/OpenImageIO" \
+            -B "$BUILD/oiio" \
+            -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DANDROID_STL=c++_static \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_STANDARD=11 \
             -DCMAKE_CXX_STANDARD=17 \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_PREFIX_PATH="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_PREFIX_PATH="$PREFIX;$BUILD/opencolorio/ext/dist" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
             -DLINKSTATIC=ON \
+            -DOpenImageIO_BUILD_MISSING_DEPS=OFF \
             -DEMBEDPLUGINS=ON \
-            -DOpenImageIO_BUILD_MISSING_DEPS= \
             -DOIIO_BUILD_TOOLS=OFF \
             -DOIIO_BUILD_TESTS=OFF \
             -DBUILD_TESTING=OFF \
@@ -412,104 +454,100 @@ jobs:
             -DUSE_LIBHEIF=OFF \
             -DUSE_OPENJPEG=OFF \
             -DUSE_FREETYPE=OFF \
-            -DUSE_PUGIXML=ON \
+            -DUSE_EXTERNAL_PUGIXML=OFF \
+            -DOIIO_USE_COMPILED_FMT=OFF \
             -DImath_DIR="$PREFIX/lib/cmake/Imath" \
             -DOpenEXR_DIR="$PREFIX/lib/cmake/OpenEXR" \
             -DOpenColorIO_DIR="$PREFIX/lib/cmake/OpenColorIO" \
             -Dfmt_DIR="$PREFIX/lib/cmake/fmt" \
-            -Dpugixml_DIR="$PREFIX/lib/cmake/pugixml"
+            2>&1 | tee "$LOGS/oiio-configure.log"
 
       - name: Build OpenImageIO
         shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
-          cmake --build "$BUILD/oiio" --parallel 2
+          cmake --build "$BUILD/oiio" \
+            --target install \
+            2>&1 | tee "$LOGS/oiio-build.log"
 
-      - name: Install OpenImageIO
+      - name: Verify installed libraries
         shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
-          cmake --install "$BUILD/oiio"
+          echo "=========================================="
+          echo " Verifying Android ARM64 OIIO stack"
+          echo "=========================================="
 
-          test -f "$PREFIX/lib/libOpenImageIO.a"
-          test -d "$PREFIX/include/OpenImageIO"
+          required=(
+            "$PREFIX/lib/libImath.a"
+            "$PREFIX/lib/libOpenEXR.a"
+            "$PREFIX/lib/libOpenColorIO.a"
+            "$PREFIX/lib/libOpenImageIO.a"
+          )
 
-      # ------------------------------------------------------------
-      # VERIFY
-      # ------------------------------------------------------------
+          for f in "${required[@]}"; do
+            test -f "$f"
+            echo "FOUND: $f"
+          done
 
-      - name: Verify OIIO Android ARM64
-        shell: bash
-        run: |
-          set -eux
+          check_archive() {
+            local archive="$1"
+            local name="$2"
+            local dir
+            local obj
 
-          check_arm64() {
-            archive="$1"
-            test -f "$archive"
+            dir="$(mktemp -d)"
 
-            obj="$(mktemp)"
-            member="$(ar t "$archive" | head -n 1)"
+            (
+              cd "$dir"
+              ar x "$archive"
+            )
 
-            test -n "$member"
+            obj="$(find "$dir" -type f -name '*.o' | head -n 1)"
 
-            ar p "$archive" "$member" > "$obj"
+            test -n "$obj"
 
-            readelf -h "$obj" | grep "AArch64"
+            echo
+            echo "----- $name -----"
+            readelf -h "$obj" | grep -E \
+              "Class:.*ELF64|Machine:.*AArch64"
 
-            rm -f "$obj"
+            rm -rf "$dir"
           }
 
-          check_arm64 "$PREFIX/lib/libImath.a"
-          check_arm64 "$PREFIX/lib/libOpenEXR.a"
-          check_arm64 "$PREFIX/lib/libOpenColorIO.a"
-          check_arm64 "$PREFIX/lib/libOpenImageIO.a"
-
-          test -f "$PREFIX/lib/cmake/Imath/ImathConfig.cmake"
+          check_archive "$PREFIX/lib/libImath.a" "Imath"
+          check_archive "$PREFIX/lib/libOpenEXR.a" "OpenEXR"
+          check_archive "$PREFIX/lib/libOpenColorIO.a" "OpenColorIO"
+          check_archive "$PREFIX/lib/libOpenImageIO.a" "OpenImageIO"
 
           echo
-          echo "======================================"
-          echo " OIIO Android ARM64 BUILD PASSED"
-          echo "======================================"
+          echo "Installed prefix:"
+          find "$PREFIX" -maxdepth 4 -type f | sort | head -n 500
 
-      # ------------------------------------------------------------
-      # PACKAGE
-      # ------------------------------------------------------------
-
-      - name: Package
+      - name: Package Android OIIO prefix
         shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
-          cat > android-oiio/manifest.txt <<EOF
-          Blender: 5.2.2
-          OpenImageIO: ${OIIO_VERSION}
-          Imath: ${IMATH_VERSION}
-          OpenEXR: ${OPENEXR_VERSION}
-          OpenColorIO: ${OPENCOLORIO_VERSION}
-          fmt: ${FMT_VERSION}
-          RobinMap: ${ROBINMAP_VERSION}
-          pugixml: ${PUGIXML_VERSION}
-          Android ABI: arm64-v8a
-          Android API: ${ANDROID_API}
-          NDK: ${ANDROID_NDK_VERSION}
-          EOF
+          tar \
+            -C "$PREFIX" \
+            -czf "$GITHUB_WORKSPACE/android-oiio/package/android-arm64-oiio-prefix.tar.gz" \
+            .
 
-          tar -czf \
-            android-oiio/package/openimageio-android-arm64.tar.gz \
-            -C android-oiio \
-            prefix manifest.txt
-
-      - name: Upload OIIO bundle
+      - name: Upload package
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: openimageio-android-arm64-blender-5.2.2
-          path: android-oiio/package/openimageio-android-arm64.tar.gz
-          if-no-files-found: error
-          retention-days: 30
+          name: android-arm64-oiio
+          path: android-oiio/package/android-arm64-oiio-prefix.tar.gz
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 1
+          overwrite: true
 
-      - name: Upload logs
+      - name: Upload build logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -517,3 +555,5 @@ jobs:
           path: android-oiio/logs
           if-no-files-found: warn
           retention-days: 14
+          compression-level: 6
+          overwrite: true
