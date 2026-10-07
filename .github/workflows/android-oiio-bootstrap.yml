@@ -10,7 +10,7 @@ env:
   ANDROID_API: "29"
   ANDROID_NDK_VERSION: "27.3.13750724"
 
-  # Blender 5.2.2 dependency versions
+  # Blender 5.2.2 dependency set
   OIIO_VERSION: "v3.1.13.1"
   IMATH_VERSION: "v3.2.2"
   OPENEXR_VERSION: "v3.4.10"
@@ -68,7 +68,8 @@ jobs:
             "platforms;android-${ANDROID_API}" \
             "ndk;${ANDROID_NDK_VERSION}"
 
-          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}" \
+            >> "$GITHUB_ENV"
 
       - name: Prepare directories
         shell: bash
@@ -89,7 +90,8 @@ jobs:
           echo "PREFIX=$GITHUB_WORKSPACE/android-oiio/prefix" >> "$GITHUB_ENV"
           echo "LOGS=$GITHUB_WORKSPACE/android-oiio/logs" >> "$GITHUB_ENV"
 
-          echo "TOOLCHAIN=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" >> "$GITHUB_ENV"
+          echo "TOOLCHAIN=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            >> "$GITHUB_ENV"
 
       - name: Download dependencies
         shell: bash
@@ -110,7 +112,7 @@ jobs:
             https://github.com/AcademySoftwareFoundation/OpenImageIO.git \
             OpenImageIO
 
-          git clone --depth 1 --branch "v2.5.0" \
+          git clone --depth 1 --branch "$OPENCOLORIO_VERSION" \
             https://github.com/AcademySoftwareFoundation/OpenColorIO.git \
             opencolorio
 
@@ -329,6 +331,7 @@ jobs:
             -DOPENEXR_TEST_TOOLS:BOOL=OFF \
             -DOPENEXR_TEST_PYTHON:BOOL=OFF \
             \
+            -DOPENEXR_INSTALL:BOOL=ON \
             -DOPENEXR_BUILD_LIBS:BOOL=ON \
             -DOPENEXR_BUILD_TOOLS:BOOL=OFF \
             -DOPENEXR_INSTALL_TOOLS:BOOL=OFF \
@@ -339,6 +342,7 @@ jobs:
             \
             -DOPENEXR_FORCE_INTERNAL_DEFLATE:BOOL=ON \
             -DOPENEXR_FORCE_INTERNAL_OPENJPH:BOOL=ON \
+            -DOPENEXR_FORCE_INTERNAL_IMATH:BOOL=OFF \
             -DOPENEXR_ENABLE_THREADING:BOOL=ON \
             -DOPENEXR_USE_TBB:BOOL=OFF \
             \
@@ -346,36 +350,37 @@ jobs:
             2>&1 | tee "$LOGS/openexr-configure.log"
 
           echo
-          echo "========== OpenEXR CMake test settings =========="
+          echo "========== OpenEXR test configuration =========="
 
           grep -E \
             '^(BUILD_TESTING|OPENEXR_TEST_LIBRARIES|OPENEXR_TEST_TOOLS|OPENEXR_TEST_PYTHON):' \
             "$BUILD/openexr/CMakeCache.txt" || true
 
-          echo
-          echo "========== Checking OpenEXR test configuration =========="
-
-          if grep -q '^BUILD_TESTING:.*=ON$' "$BUILD/openexr/CMakeCache.txt"; then
-            echo "ERROR: BUILD_TESTING is still ON"
+          if grep -q '^BUILD_TESTING:.*=ON$' \
+              "$BUILD/openexr/CMakeCache.txt"; then
+            echo "ERROR: BUILD_TESTING is ON"
             exit 1
           fi
 
-          if grep -q '^OPENEXR_TEST_LIBRARIES:.*=ON$' "$BUILD/openexr/CMakeCache.txt"; then
-            echo "ERROR: OPENEXR_TEST_LIBRARIES is still ON"
+          if grep -q '^OPENEXR_TEST_LIBRARIES:.*=ON$' \
+              "$BUILD/openexr/CMakeCache.txt"; then
+            echo "ERROR: OPENEXR_TEST_LIBRARIES is ON"
             exit 1
           fi
 
-          if grep -q '^OPENEXR_TEST_TOOLS:.*=ON$' "$BUILD/openexr/CMakeCache.txt"; then
-            echo "ERROR: OPENEXR_TEST_TOOLS is still ON"
+          if grep -q '^OPENEXR_TEST_TOOLS:.*=ON$' \
+              "$BUILD/openexr/CMakeCache.txt"; then
+            echo "ERROR: OPENEXR_TEST_TOOLS is ON"
             exit 1
           fi
 
-          if grep -q '^OPENEXR_TEST_PYTHON:.*=ON$' "$BUILD/openexr/CMakeCache.txt"; then
-            echo "ERROR: OPENEXR_TEST_PYTHON is still ON"
+          if grep -q '^OPENEXR_TEST_PYTHON:.*=ON$' \
+              "$BUILD/openexr/CMakeCache.txt"; then
+            echo "ERROR: OPENEXR_TEST_PYTHON is ON"
             exit 1
           fi
 
-      - name: Build OpenEXR libraries only
+      - name: Build OpenEXR libraries
         shell: bash
         run: |
           set -euxo pipefail
@@ -399,7 +404,7 @@ jobs:
             --install "$BUILD/openexr" \
             2>&1 | tee "$LOGS/openexr-install.log"
 
-      - name: Verify OpenEXR has no tests
+      - name: Verify OpenEXR test tree
         shell: bash
         run: |
           set -eux
@@ -413,15 +418,7 @@ jobs:
             exit 1
           fi
 
-          echo "OpenEXR test tree not generated."
-
-          find "$PREFIX/lib" \
-            -maxdepth 1 \
-            -type f \
-            -name 'libOpenEXR*.a' \
-            -o -name 'libIex*.a' \
-            -o -name 'libIlmThread*.a' \
-            | sort
+          echo "OpenEXR test tree was not generated."
 
       - name: Build fmt
         shell: bash
@@ -449,7 +446,7 @@ jobs:
             --target install \
             2>&1 | tee "$LOGS/fmt-build.log"
 
-      - name: Install Robin-map
+      - name: Install Robin-map headers
         shell: bash
         run: |
           set -euxo pipefail
@@ -493,9 +490,7 @@ jobs:
             -DOCIO_BUILD_DOCS=OFF \
             -DOCIO_BUILD_PYTHON=OFF \
             -DOCIO_BUILD_JAVA=OFF \
-            \
             -DOCIO_USE_OIIO_FOR_APPS=OFF \
-            -DOCIO_USE_HEADLESS=OFF \
             \
             -DImath_DIR="$PREFIX/lib/cmake/Imath" \
             2>&1 | tee "$LOGS/opencolorio-configure.log"
@@ -505,7 +500,7 @@ jobs:
             -j 2 \
             2>&1 | tee "$LOGS/opencolorio-build.log"
 
-      - name: Import OpenColorIO bundled dependencies
+      - name: Collect OpenColorIO bundled dependencies
         shell: bash
         run: |
           set -euxo pipefail
@@ -516,11 +511,14 @@ jobs:
               "$PREFIX/"
           fi
 
+          echo
+          echo "OpenColorIO external dependency files:"
           find "$BUILD/opencolorio/ext/dist" \
-            -maxdepth 3 \
+            -maxdepth 4 \
             -type f \
             2>/dev/null \
-            | head -n 200 || true
+            | sort \
+            | head -n 300 || true
 
       - name: Configure OpenImageIO
         shell: bash
@@ -571,7 +569,7 @@ jobs:
             -DZLIB_ROOT="$PREFIX" \
             -DPNG_ROOT="$PREFIX" \
             -DTIFF_ROOT="$PREFIX" \
-            -DCMAKE_FIND_ROOT_PATH="$PREFIX;$ANDROID_NDK_ROOT/sysroot" \
+            -DCMAKE_FIND_ROOT_PATH="$PREFIX" \
             \
             -DImath_DIR="$PREFIX/lib/cmake/Imath" \
             -DOpenEXR_DIR="$PREFIX/lib/cmake/OpenEXR" \
@@ -610,23 +608,59 @@ jobs:
           echo " Android ARM64 OIIO dependency verification"
           echo "=========================================="
 
-          required=(
-            "$PREFIX/lib/libImath.a"
-            "$PREFIX/lib/libOpenEXR.a"
-            "$PREFIX/lib/libOpenColorIO.a"
-            "$PREFIX/lib/libOpenImageIO.a"
-          )
+          echo
+          echo "Installed libraries:"
+          find "$PREFIX/lib" \
+            -maxdepth 1 \
+            -type f \
+            \( -name '*.a' -o -name '*.so' \) \
+            -print \
+            | sort
 
-          for f in "${required[@]}"; do
-            test -f "$f"
-            echo "FOUND: $f"
-          done
+          find_static() {
+            local pattern="$1"
+            local result
+
+            result="$(
+              find "$PREFIX/lib" \
+                -maxdepth 1 \
+                -type f \
+                -name "$pattern" \
+                -print \
+                | sort \
+                | head -n 1
+            )"
+
+            if [ -z "$result" ]; then
+              echo
+              echo "ERROR: Missing library matching: $pattern"
+              echo
+              echo "Available static libraries:"
+              find "$PREFIX/lib" \
+                -maxdepth 1 \
+                -type f \
+                -name '*.a' \
+                -print \
+                | sort
+              exit 1
+            fi
+
+            printf '%s\n' "$result"
+          }
 
           check_archive() {
             local archive="$1"
             local name="$2"
             local tmp
             local obj
+
+            echo
+            echo "=========================================="
+            echo " Checking $name"
+            echo " Archive: $archive"
+            echo "=========================================="
+
+            test -f "$archive"
 
             tmp="$(mktemp -d)"
 
@@ -635,23 +669,53 @@ jobs:
               ar x "$archive"
             )
 
-            obj="$(find "$tmp" -type f -name '*.o' | head -n 1)"
+            obj="$(
+              find "$tmp" \
+                -type f \
+                -name '*.o' \
+                -print \
+                | head -n 1
+            )"
 
-            test -n "$obj"
+            if [ -z "$obj" ]; then
+              echo "ERROR: No ELF object found inside $archive"
+              rm -rf "$tmp"
+              exit 1
+            fi
 
-            echo
-            echo "----- $name -----"
+            readelf -h "$obj" > "$tmp/header.txt"
 
-            readelf -h "$obj" |
-              grep -E 'Class:.*ELF64|Machine:.*AArch64'
+            cat "$tmp/header.txt"
+
+            grep -q 'Class:.*ELF64' "$tmp/header.txt"
+            grep -q 'Machine:.*AArch64' "$tmp/header.txt"
+
+            echo "PASS: $name is ELF64 AArch64"
 
             rm -rf "$tmp"
           }
 
-          check_archive "$PREFIX/lib/libImath.a" "Imath"
-          check_archive "$PREFIX/lib/libOpenEXR.a" "OpenEXR"
-          check_archive "$PREFIX/lib/libOpenColorIO.a" "OpenColorIO"
-          check_archive "$PREFIX/lib/libOpenImageIO.a" "OpenImageIO"
+          IMATH_LIB="$(find_static 'libImath*.a')"
+          OPENEXR_LIB="$(find_static 'libOpenEXR*.a')"
+          OCIO_LIB="$(find_static 'libOpenColorIO*.a')"
+          OIIO_LIB="$(find_static 'libOpenImageIO*.a')"
+
+          echo
+          echo "Detected libraries:"
+          echo "  Imath       = $IMATH_LIB"
+          echo "  OpenEXR     = $OPENEXR_LIB"
+          echo "  OpenColorIO = $OCIO_LIB"
+          echo "  OpenImageIO = $OIIO_LIB"
+
+          check_archive "$IMATH_LIB" "Imath"
+          check_archive "$OPENEXR_LIB" "OpenEXR"
+          check_archive "$OCIO_LIB" "OpenColorIO"
+          check_archive "$OIIO_LIB" "OpenImageIO"
+
+          echo
+          echo "=========================================="
+          echo " ARM64 verification PASSED"
+          echo "=========================================="
 
       - name: Show final prefix
         shell: bash
@@ -664,7 +728,7 @@ jobs:
             -maxdepth 4 \
             -type f \
             | sort \
-            | head -n 600
+            | head -n 800
 
       - name: Package Android OIIO prefix
         shell: bash
