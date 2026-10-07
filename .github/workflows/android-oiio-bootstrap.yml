@@ -10,11 +10,12 @@ env:
   ANDROID_API: "29"
   ANDROID_NDK_VERSION: "27.3.13750724"
 
-  # Blender 5.2.2 dependency set
+  # Blender 5.2.2 dependency versions
   OIIO_VERSION: "v3.1.13.1"
   IMATH_VERSION: "v3.2.2"
   OPENEXR_VERSION: "v3.4.10"
   OPENCOLORIO_VERSION: "v2.5.0"
+
   FMT_VERSION: "12.1.0"
   ROBINMAP_VERSION: "v1.3.0"
 
@@ -40,8 +41,12 @@ jobs:
           packages: ""
 
       - name: Install host tools
+        shell: bash
         run: |
+          set -euxo pipefail
+
           sudo apt-get update
+
           sudo apt-get install -y \
             cmake \
             ninja-build \
@@ -105,7 +110,7 @@ jobs:
             https://github.com/AcademySoftwareFoundation/OpenImageIO.git \
             OpenImageIO
 
-          git clone --depth 1 --branch "$OPENCOLORIO_VERSION" \
+          git clone --depth 1 --branch "v2.5.0" \
             https://github.com/AcademySoftwareFoundation/OpenColorIO.git \
             opencolorio
 
@@ -133,7 +138,7 @@ jobs:
             https://gitlab.com/libtiff/libtiff.git \
             tiff
 
-      - name: Show revisions
+      - name: Show source revisions
         shell: bash
         run: |
           set -eux
@@ -153,7 +158,7 @@ jobs:
             tiff
           do
             echo
-            echo "===== $d ====="
+            echo "========== $d =========="
             git -C "$d" rev-parse HEAD
             git -C "$d" describe --tags --always || true
           done
@@ -296,10 +301,12 @@ jobs:
             --target install \
             2>&1 | tee "$LOGS/imath-build.log"
 
-      - name: Build OpenEXR
+      - name: Configure OpenEXR
         shell: bash
         run: |
           set -euxo pipefail
+
+          rm -rf "$BUILD/openexr"
 
           cmake \
             -S "$SRC/openexr" \
@@ -311,22 +318,110 @@ jobs:
             -DANDROID_STL=c++_static \
             -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=17 \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DCMAKE_PREFIX_PATH="$PREFIX" \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
-            -DOPENEXR_BUILD_TESTS=OFF \
-            -DOPENEXR_BUILD_TOOLS=OFF \
-            -DOPENEXR_BUILD_EXAMPLES=OFF \
-            -DOPENEXR_BUILD_PYTHON=OFF \
-            -DOPENEXR_FORCE_INTERNAL_OPENJPH=ON \
-            -DOPENEXR_FORCE_INTERNAL_DEFLATE=ON \
+            \
+            -DBUILD_TESTING:BOOL=OFF \
+            -DOPENEXR_TEST_LIBRARIES:BOOL=OFF \
+            -DOPENEXR_TEST_TOOLS:BOOL=OFF \
+            -DOPENEXR_TEST_PYTHON:BOOL=OFF \
+            \
+            -DOPENEXR_BUILD_LIBS:BOOL=ON \
+            -DOPENEXR_BUILD_TOOLS:BOOL=OFF \
+            -DOPENEXR_INSTALL_TOOLS:BOOL=OFF \
+            -DOPENEXR_INSTALL_DEVELOPER_TOOLS:BOOL=OFF \
+            -DOPENEXR_BUILD_EXAMPLES:BOOL=OFF \
+            -DOPENEXR_BUILD_PYTHON:BOOL=OFF \
+            -DOPENEXR_BUILD_OSS_FUZZ:BOOL=OFF \
+            \
+            -DOPENEXR_FORCE_INTERNAL_DEFLATE:BOOL=ON \
+            -DOPENEXR_FORCE_INTERNAL_OPENJPH:BOOL=ON \
+            -DOPENEXR_ENABLE_THREADING:BOOL=ON \
+            -DOPENEXR_USE_TBB:BOOL=OFF \
+            \
             -DImath_DIR="$PREFIX/lib/cmake/Imath" \
             2>&1 | tee "$LOGS/openexr-configure.log"
 
+          echo
+          echo "========== OpenEXR CMake test settings =========="
+
+          grep -E \
+            '^(BUILD_TESTING|OPENEXR_TEST_LIBRARIES|OPENEXR_TEST_TOOLS|OPENEXR_TEST_PYTHON):' \
+            "$BUILD/openexr/CMakeCache.txt" || true
+
+          echo
+          echo "========== Checking OpenEXR test configuration =========="
+
+          if grep -q '^BUILD_TESTING:.*=ON$' "$BUILD/openexr/CMakeCache.txt"; then
+            echo "ERROR: BUILD_TESTING is still ON"
+            exit 1
+          fi
+
+          if grep -q '^OPENEXR_TEST_LIBRARIES:.*=ON$' "$BUILD/openexr/CMakeCache.txt"; then
+            echo "ERROR: OPENEXR_TEST_LIBRARIES is still ON"
+            exit 1
+          fi
+
+          if grep -q '^OPENEXR_TEST_TOOLS:.*=ON$' "$BUILD/openexr/CMakeCache.txt"; then
+            echo "ERROR: OPENEXR_TEST_TOOLS is still ON"
+            exit 1
+          fi
+
+          if grep -q '^OPENEXR_TEST_PYTHON:.*=ON$' "$BUILD/openexr/CMakeCache.txt"; then
+            echo "ERROR: OPENEXR_TEST_PYTHON is still ON"
+            exit 1
+          fi
+
+      - name: Build OpenEXR libraries only
+        shell: bash
+        run: |
+          set -euxo pipefail
+
           cmake --build "$BUILD/openexr" \
-            --target install \
+            --target \
+              Iex \
+              IlmThread \
+              OpenEXRCore \
+              OpenEXR \
+              OpenEXRUtil \
+            -j 2 \
             2>&1 | tee "$LOGS/openexr-build.log"
+
+      - name: Install OpenEXR
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cmake \
+            --install "$BUILD/openexr" \
+            2>&1 | tee "$LOGS/openexr-install.log"
+
+      - name: Verify OpenEXR has no tests
+        shell: bash
+        run: |
+          set -eux
+
+          if find "$BUILD/openexr" \
+              -path '*/src/test/*' \
+              -type f \
+              | head -n 1 \
+              | grep -q .; then
+            echo "ERROR: OpenEXR test files were generated."
+            exit 1
+          fi
+
+          echo "OpenEXR test tree not generated."
+
+          find "$PREFIX/lib" \
+            -maxdepth 1 \
+            -type f \
+            -name 'libOpenEXR*.a' \
+            -o -name 'libIex*.a' \
+            -o -name 'libIlmThread*.a' \
+            | sort
 
       - name: Build fmt
         shell: bash
@@ -354,18 +449,19 @@ jobs:
             --target install \
             2>&1 | tee "$LOGS/fmt-build.log"
 
-      - name: Install Robin-map headers
+      - name: Install Robin-map
         shell: bash
         run: |
           set -euxo pipefail
 
           mkdir -p "$PREFIX/include/tsl"
 
-          cp "$SRC/robinmap/include/tsl/robin_map.h" \
+          cp -a \
+            "$SRC/robinmap/include/tsl/." \
             "$PREFIX/include/tsl/"
 
-          cp "$SRC/robinmap/include/tsl/robin_set.h" \
-            "$PREFIX/include/tsl/"
+          test -f "$PREFIX/include/tsl/robin_map.h"
+          test -f "$PREFIX/include/tsl/robin_set.h"
 
       - name: Build OpenColorIO
         shell: bash
@@ -386,29 +482,45 @@ jobs:
             -DCMAKE_PREFIX_PATH="$PREFIX" \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
-            -DOCIO_INSTALL_EXT_PACKAGES=MISSING \
+            \
+            -DOCIO_INSTALL_EXT_PACKAGES=ALL \
+            \
             -DOCIO_BUILD_APPS=OFF \
-            -DOCIO_BUILD_PYTHON=OFF \
+            -DOCIO_BUILD_OPENFX=OFF \
+            -DOCIO_BUILD_NUKE=OFF \
             -DOCIO_BUILD_TESTS=OFF \
             -DOCIO_BUILD_GPU_TESTS=OFF \
             -DOCIO_BUILD_DOCS=OFF \
-            -DOCIO_BUILD_OPENFX=OFF \
-            -DOCIO_USE_OPENGL=OFF \
+            -DOCIO_BUILD_PYTHON=OFF \
+            -DOCIO_BUILD_JAVA=OFF \
+            \
+            -DOCIO_USE_OIIO_FOR_APPS=OFF \
+            -DOCIO_USE_HEADLESS=OFF \
+            \
             -DImath_DIR="$PREFIX/lib/cmake/Imath" \
-            -DZLIB_USE_STATIC_LIBS=ON \
-            -DZLIB_ROOT="$PREFIX" \
             2>&1 | tee "$LOGS/opencolorio-configure.log"
 
           cmake --build "$BUILD/opencolorio" \
             --target install \
+            -j 2 \
             2>&1 | tee "$LOGS/opencolorio-build.log"
 
-          # OCIO keeps automatically-built dependency libraries under ext/dist.
-          # Copy them into our final Android prefix so later Blender linking
-          # does not depend on the temporary OCIO build directory.
+      - name: Import OpenColorIO bundled dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+
           if [ -d "$BUILD/opencolorio/ext/dist" ]; then
-            cp -a "$BUILD/opencolorio/ext/dist/." "$PREFIX/"
+            cp -a \
+              "$BUILD/opencolorio/ext/dist/." \
+              "$PREFIX/"
           fi
+
+          find "$BUILD/opencolorio/ext/dist" \
+            -maxdepth 3 \
+            -type f \
+            2>/dev/null \
+            | head -n 200 || true
 
       - name: Configure OpenImageIO
         shell: bash
@@ -429,18 +541,15 @@ jobs:
             -DCMAKE_CXX_STANDARD=17 \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DCMAKE_INSTALL_LIBDIR=lib \
-            -DCMAKE_PREFIX_PATH="$PREFIX;$BUILD/opencolorio/ext/dist" \
+            -DCMAKE_PREFIX_PATH="$PREFIX" \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
             -DLINKSTATIC=ON \
+            \
             -DOpenImageIO_BUILD_MISSING_DEPS=OFF \
-            -DEMBEDPLUGINS=ON \
-            -DOIIO_BUILD_TOOLS=OFF \
             -DOIIO_BUILD_TESTS=OFF \
-            -DBUILD_TESTING=OFF \
-            -DBUILD_DOCS=OFF \
-            -DINSTALL_DOCS=OFF \
-            -DINSTALL_FONTS=OFF \
+            -DOIIO_BUILD_TOOLS=OFF \
+            \
             -DUSE_PYTHON=OFF \
             -DUSE_QT=OFF \
             -DUSE_OPENGL=OFF \
@@ -454,13 +563,33 @@ jobs:
             -DUSE_LIBHEIF=OFF \
             -DUSE_OPENJPEG=OFF \
             -DUSE_FREETYPE=OFF \
+            \
             -DUSE_EXTERNAL_PUGIXML=OFF \
             -DOIIO_USE_COMPILED_FMT=OFF \
+            -DOIIO_INTERNALIZE_FMT=ON \
+            \
+            -DZLIB_ROOT="$PREFIX" \
+            -DPNG_ROOT="$PREFIX" \
+            -DTIFF_ROOT="$PREFIX" \
+            -DCMAKE_FIND_ROOT_PATH="$PREFIX;$ANDROID_NDK_ROOT/sysroot" \
+            \
             -DImath_DIR="$PREFIX/lib/cmake/Imath" \
             -DOpenEXR_DIR="$PREFIX/lib/cmake/OpenEXR" \
             -DOpenColorIO_DIR="$PREFIX/lib/cmake/OpenColorIO" \
             -Dfmt_DIR="$PREFIX/lib/cmake/fmt" \
+            \
             2>&1 | tee "$LOGS/oiio-configure.log"
+
+      - name: Verify OpenImageIO configuration
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "========== Selected OIIO options =========="
+
+          grep -E \
+            '^(USE_EXTERNAL_PUGIXML|OIIO_USE_COMPILED_FMT|OIIO_INTERNALIZE_FMT|OIIO_BUILD_TESTS|OIIO_BUILD_TOOLS|OpenImageIO_BUILD_MISSING_DEPS):' \
+            "$BUILD/oiio/CMakeCache.txt" || true
 
       - name: Build OpenImageIO
         shell: bash
@@ -469,15 +598,16 @@ jobs:
 
           cmake --build "$BUILD/oiio" \
             --target install \
+            -j 2 \
             2>&1 | tee "$LOGS/oiio-build.log"
 
-      - name: Verify installed libraries
+      - name: Verify Android ARM64 libraries
         shell: bash
         run: |
           set -euxo pipefail
 
           echo "=========================================="
-          echo " Verifying Android ARM64 OIIO stack"
+          echo " Android ARM64 OIIO dependency verification"
           echo "=========================================="
 
           required=(
@@ -495,26 +625,27 @@ jobs:
           check_archive() {
             local archive="$1"
             local name="$2"
-            local dir
+            local tmp
             local obj
 
-            dir="$(mktemp -d)"
+            tmp="$(mktemp -d)"
 
             (
-              cd "$dir"
+              cd "$tmp"
               ar x "$archive"
             )
 
-            obj="$(find "$dir" -type f -name '*.o' | head -n 1)"
+            obj="$(find "$tmp" -type f -name '*.o' | head -n 1)"
 
             test -n "$obj"
 
             echo
             echo "----- $name -----"
-            readelf -h "$obj" | grep -E \
-              "Class:.*ELF64|Machine:.*AArch64"
 
-            rm -rf "$dir"
+            readelf -h "$obj" |
+              grep -E 'Class:.*ELF64|Machine:.*AArch64'
+
+            rm -rf "$tmp"
           }
 
           check_archive "$PREFIX/lib/libImath.a" "Imath"
@@ -522,9 +653,18 @@ jobs:
           check_archive "$PREFIX/lib/libOpenColorIO.a" "OpenColorIO"
           check_archive "$PREFIX/lib/libOpenImageIO.a" "OpenImageIO"
 
-          echo
-          echo "Installed prefix:"
-          find "$PREFIX" -maxdepth 4 -type f | sort | head -n 500
+      - name: Show final prefix
+        shell: bash
+        run: |
+          set -eux
+
+          echo "========== FINAL PREFIX =========="
+
+          find "$PREFIX" \
+            -maxdepth 4 \
+            -type f \
+            | sort \
+            | head -n 600
 
       - name: Package Android OIIO prefix
         shell: bash
@@ -533,10 +673,11 @@ jobs:
 
           tar \
             -C "$PREFIX" \
-            -czf "$GITHUB_WORKSPACE/android-oiio/package/android-arm64-oiio-prefix.tar.gz" \
+            -czf \
+            "$GITHUB_WORKSPACE/android-oiio/package/android-arm64-oiio-prefix.tar.gz" \
             .
 
-      - name: Upload package
+      - name: Upload OIIO package
         if: always()
         uses: actions/upload-artifact@v4
         with:
