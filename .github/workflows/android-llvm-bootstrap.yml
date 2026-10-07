@@ -67,11 +67,8 @@ jobs:
       # ============================================================
       # ANDROID SDK
       #
-      # v4 is important here.
-      # It no longer requests the obsolete "tools" package.
-      #
-      # We use packages: '' because we install exactly the SDK
-      # components we need ourselves in the next step.
+      # Empty packages prevents setup-android from requesting
+      # deprecated SDK packages.
       # ============================================================
 
       - name: Set up Android SDK
@@ -81,7 +78,7 @@ jobs:
 
 
       # ============================================================
-      # ANDROID SDK / NDK
+      # ANDROID PLATFORM + NDK
       # ============================================================
 
       - name: Install Android platform and NDK
@@ -113,7 +110,6 @@ jobs:
           NDK="$SDK_ROOT/ndk/${ANDROID_NDK_VERSION}"
 
           if [ ! -d "$NDK" ]; then
-            echo
             echo "ERROR: Android NDK was not installed:"
             echo "$NDK"
             exit 1
@@ -125,7 +121,7 @@ jobs:
 
           echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$NDK" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK=$NDK" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK=$NDK"
 
 
       # ============================================================
@@ -150,9 +146,10 @@ jobs:
 
           test -x "$TOOLCHAIN_BIN/clang"
           test -x "$TOOLCHAIN_BIN/clang++"
+          test -x "$TOOLCHAIN_BIN/ld.lld"
 
           echo
-          echo "NDK version:"
+          echo "NDK:"
           cat "$ANDROID_NDK_ROOT/source.properties"
 
           echo
@@ -164,7 +161,11 @@ jobs:
           "$TOOLCHAIN_BIN/clang++" --version
 
           echo
-          echo "Testing Android target compiler..."
+          echo "LLD:"
+          "$TOOLCHAIN_BIN/ld.lld" --version
+
+          echo
+          echo "Testing Android ARM64 compiler..."
 
           "$TOOLCHAIN_BIN/clang" \
             --target=aarch64-linux-android${ANDROID_API} \
@@ -188,7 +189,7 @@ jobs:
 
 
       # ============================================================
-      # DOWNLOAD LLVM 20.1.8
+      # DOWNLOAD LLVM
       # ============================================================
 
       - name: Download LLVM 20.1.8
@@ -215,7 +216,6 @@ jobs:
           test -s "$LLVM_ARCHIVE"
 
           rm -rf llvm-source
-
           mkdir -p llvm-source
 
           tar \
@@ -231,11 +231,10 @@ jobs:
 
 
       # ============================================================
-      # HOST TABLEGEN CONFIGURATION
+      # HOST TABLEGEN
       #
-      # These executables run on the Ubuntu x86_64 runner.
-      #
-      # They are NOT Android binaries.
+      # These are x86_64 Linux executables.
+      # They run on GitHub's runner.
       # ============================================================
 
       - name: Configure host LLVM TableGen
@@ -247,7 +246,6 @@ jobs:
           BUILD="$GITHUB_WORKSPACE/llvm-host-build"
 
           rm -rf "$BUILD"
-
           mkdir -p "$BUILD"
 
           echo "=========================================="
@@ -311,7 +309,6 @@ jobs:
           set -e
 
           if [ "$STATUS" -ne 0 ]; then
-
             echo
             echo "=========================================="
             echo " HOST TABLEGEN BUILD FAILED"
@@ -321,7 +318,7 @@ jobs:
             echo "========== IMPORTANT ERRORS =========="
 
             grep -E \
-              "fatal error:|undefined reference|collect2: error|error: |FAILED:|ninja: build stopped" \
+              "fatal error:|undefined reference|ld.lld: error|collect2: error|error: |FAILED:|ninja: build stopped" \
               "$LOG" \
               | tail -100 || true
 
@@ -331,7 +328,6 @@ jobs:
             tail -150 "$LOG"
 
             exit "$STATUS"
-
           fi
 
           echo
@@ -400,8 +396,12 @@ jobs:
 
           echo
           echo "Versions:"
+
           "$LLVM_TBLGEN" --version
           "$CLANG_TBLGEN" --version
+
+          echo
+          echo "Saving host tool paths..."
 
           echo "LLVM_NATIVE_TOOL_DIR=$HOST_TOOL_DIR" >> "$GITHUB_ENV"
           echo "LLVM_TABLEGEN=$LLVM_TBLGEN" >> "$GITHUB_ENV"
@@ -409,7 +409,7 @@ jobs:
 
 
       # ============================================================
-      # CONFIGURE LLVM FOR ANDROID ARM64
+      # CONFIGURE ANDROID LLVM
       # ============================================================
 
       - name: Configure Android LLVM
@@ -451,7 +451,15 @@ jobs:
           echo "$ANDROID_NDK_ROOT"
 
           echo
-          echo "Host TableGen:"
+          echo "Android API:"
+          echo "$ANDROID_API"
+
+          echo
+          echo "Android ABI:"
+          echo "$ANDROID_ABI"
+
+          echo
+          echo "Native TableGen directory:"
           echo "$LLVM_NATIVE_TOOL_DIR"
 
           cmake \
@@ -468,14 +476,16 @@ jobs:
             -DCMAKE_CXX_COMPILER_TARGET="aarch64-linux-android${ANDROID_API}" \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DLLVM_ENABLE_PIC=ON \
-            -DLLVM_ENABLE_PROJECTS="clang" \
-            -DLLVM_TARGETS_TO_BUILD="AArch64" \
-            -DLLVM_TARGET_ARCH="AArch64" \
+            -DCMAKE_SYSTEM_NAME=Android \
+            -DLLVM_HOST_TRIPLE="x86_64-unknown-linux-gnu" \
             -DLLVM_DEFAULT_TARGET_TRIPLE="aarch64-linux-android${ANDROID_API}" \
+            -DLLVM_TARGET_ARCH="AArch64" \
+            -DLLVM_TARGETS_TO_BUILD="AArch64" \
+            -DLLVM_ENABLE_PROJECTS="clang" \
+            -DLLVM_USE_HOST_TOOLS=ON \
             -DLLVM_NATIVE_TOOL_DIR="$LLVM_NATIVE_TOOL_DIR" \
             -DLLVM_TABLEGEN="$LLVM_TABLEGEN" \
             -DCLANG_TABLEGEN="$CLANG_TABLEGEN" \
-            -DLLVM_USE_HOST_TOOLS=ON \
             -DLLVM_BUILD_TOOLS=OFF \
             -DLLVM_INCLUDE_TOOLS=OFF \
             -DLLVM_BUILD_UTILS=OFF \
@@ -495,9 +505,9 @@ jobs:
             -DLLVM_ENABLE_RTTI=ON \
             -DLLVM_ENABLE_EH=ON \
             -DLLVM_ENABLE_UNWIND_TABLES=ON \
-            -DLLVM_BUILD_LLVM_DYLIB=ON \
-            -DLLVM_LINK_LLVM_DYLIB=ON \
-            -DCLANG_LINK_CLANG_DYLIB=ON \
+            -DLLVM_BUILD_LLVM_DYLIB=OFF \
+            -DLLVM_LINK_LLVM_DYLIB=OFF \
+            -DCLANG_LINK_CLANG_DYLIB=OFF \
             -DCLANG_INCLUDE_TESTS=OFF \
             -DCLANG_INCLUDE_DOCS=OFF
 
@@ -532,7 +542,6 @@ jobs:
           set -e
 
           if [ "$STATUS" -ne 0 ]; then
-
             echo
             echo "=========================================="
             echo " ANDROID LLVM BUILD FAILED"
@@ -552,7 +561,6 @@ jobs:
             tail -150 "$LOG"
 
             exit "$STATUS"
-
           fi
 
           echo
@@ -589,33 +597,63 @@ jobs:
           set -e
 
           if [ "$STATUS" -ne 0 ]; then
-
             echo
             echo "=========================================="
             echo " LLVM INSTALL FAILED"
             echo "=========================================="
 
             echo
-            echo "========== INSTALL OUTPUT =========="
-
             cat "$LOG"
 
             exit "$STATUS"
-
           fi
 
           echo
-          echo "Android LLVM installation completed."
+          echo "Android LLVM installation completed successfully."
 
 
       # ============================================================
-      # VERIFY ARM64 LIBRARIES
+      # VERIFY LLVM HEADERS
+      # ============================================================
+
+      - name: Verify LLVM headers
+        shell: bash
+        run: |
+          set -eux
+
+          INSTALL="$GITHUB_WORKSPACE/llvm-android-install"
+
+          echo "=========================================="
+          echo " Verifying LLVM Headers"
+          echo "=========================================="
+
+          test -f "$INSTALL/include/llvm/IR/Module.h"
+          test -f "$INSTALL/include/llvm/Support/Error.h"
+          test -f "$INSTALL/include/llvm/ADT/StringRef.h"
+
+          echo
+          echo "LLVM headers:"
+          echo "  llvm/IR/Module.h       OK"
+          echo "  llvm/Support/Error.h   OK"
+          echo "  llvm/ADT/StringRef.h   OK"
+
+          echo
+          echo "LLVM header verification: PASSED"
+
+
+      # ============================================================
+      # VERIFY STATIC ARCHIVE ARCHITECTURE
+      #
+      # IMPORTANT:
+      # .a files are ar archives.
+      # We extract a real ELF object member before inspecting it.
       # ============================================================
 
       - name: Verify Android LLVM ARM64
         shell: bash
         run: |
-          set -eux
+          set -u
+          set -o pipefail
 
           INSTALL="$GITHUB_WORKSPACE/llvm-android-install"
 
@@ -623,116 +661,229 @@ jobs:
           echo " Verifying Android LLVM ARM64"
           echo "=========================================="
 
-          test -d "$INSTALL/include"
-          test -d "$INSTALL/lib"
+          if [ ! -d "$INSTALL/lib" ]; then
+            echo "ERROR: LLVM lib directory is missing."
+            exit 1
+          fi
 
           echo
-          echo "Installed LLVM/Clang libraries:"
+          echo "Installed LLVM libraries:"
 
           find "$INSTALL/lib" \
             -maxdepth 1 \
             -type f \
             \( \
-              -name "libLLVM*.so*" \
-              -o -name "libLLVM*.a" \
-              -o -name "libclang*.so*" \
-              -o -name "libclang*.a" \
+              -name "libLLVM*.a" \
+              -o -name "libLLVM*.so" \
+              -o -name "libLLVM*.so.*" \
             \) \
             -print \
             | sort
 
-          LLVM_LIB="$(
-            find "$INSTALL/lib" \
-              -maxdepth 1 \
-              -type f \
-              \( \
-                -name "libLLVM*.so*" \
-                -o -name "libLLVM*.a" \
-              \) \
-              -print \
-              -quit
-          )"
+          # --------------------------------------------------------
+          # Prefer LLVMCore because it is an actual LLVM runtime
+          # library, not just a TableGen component.
+          # --------------------------------------------------------
 
-          if [ -z "$LLVM_LIB" ]; then
-            echo "ERROR: No LLVM library was installed."
+          LLVM_ARCHIVE="$INSTALL/lib/libLLVMCore.a"
+
+          if [ ! -f "$LLVM_ARCHIVE" ]; then
+            LLVM_ARCHIVE="$(
+              find "$INSTALL/lib" \
+                -maxdepth 1 \
+                -type f \
+                -name "libLLVM*.a" \
+                ! -name "libLLVMTableGen*" \
+                -print \
+                -quit
+            )"
+          fi
+
+          if [ -z "$LLVM_ARCHIVE" ] || [ ! -f "$LLVM_ARCHIVE" ]; then
+            echo
+            echo "ERROR: No LLVM runtime static archive was found."
             exit 1
           fi
 
           echo
-          echo "Selected LLVM library:"
-          echo "$LLVM_LIB"
+          echo "Selected LLVM archive:"
+          echo "$LLVM_ARCHIVE"
 
           echo
-          echo "File information:"
-          file "$LLVM_LIB"
+          echo "Archive type:"
+          file "$LLVM_ARCHIVE"
+
+          # --------------------------------------------------------
+          # Find an actual object member.
+          # --------------------------------------------------------
+
+          MEMBER="$(
+            ar t "$LLVM_ARCHIVE" \
+              | grep -E '\.o$' \
+              | head -n 1
+          )"
+
+          if [ -z "$MEMBER" ]; then
+            echo
+            echo "ERROR: No ELF object member was found in archive."
+            echo
+            echo "Archive members:"
+            ar t "$LLVM_ARCHIVE" | head -50
+            exit 1
+          fi
+
+          echo
+          echo "Selected archive member:"
+          echo "$MEMBER"
+
+          TMPDIR="$(mktemp -d)"
+
+          cleanup() {
+            rm -rf "$TMPDIR"
+          }
+
+          trap cleanup EXIT
+
+          ar p "$LLVM_ARCHIVE" "$MEMBER" \
+            > "$TMPDIR/member.o"
+
+          test -s "$TMPDIR/member.o"
 
           echo
           echo "ELF information:"
-          readelf -h "$LLVM_LIB" | grep -E \
-            "Class:|Machine:|Type:"
+
+          readelf -h "$TMPDIR/member.o" \
+            | grep -E \
+              "Class:|Type:|Machine:"
+
+          MACHINE="$(
+            readelf -h "$TMPDIR/member.o" \
+              | awk -F: '/Machine:/ {
+                gsub(/^[ \t]+/, "", $2);
+                print $2
+              }'
+          )"
+
+          if [ "$MACHINE" != "AArch64" ]; then
+            echo
+            echo "ERROR: LLVM object is not AArch64."
+            echo "Detected machine: $MACHINE"
+            exit 1
+          fi
 
           echo
-          echo "Checking for AArch64..."
-
-          file "$LLVM_LIB" | grep -Ei \
-            "aarch64|ARM aarch64"
-
-          echo
-          echo "Android LLVM architecture verification: PASSED"
+          echo "LLVM object architecture: AArch64"
+          echo "LLVM ARM64 architecture verification: PASSED"
 
 
       # ============================================================
-      # VERIFY CLANG
+      # VERIFY CLANG ARM64
       # ============================================================
 
-      - name: Verify Android Clang libraries
+      - name: Verify Android Clang ARM64
         shell: bash
         run: |
-          set -eux
+          set -u
+          set -o pipefail
 
           INSTALL="$GITHUB_WORKSPACE/llvm-android-install"
 
           echo "=========================================="
-          echo " Verifying Android Clang"
+          echo " Verifying Android Clang ARM64"
           echo "=========================================="
 
-          CLANG_LIB="$(
+          CLANG_ARCHIVE="$(
             find "$INSTALL/lib" \
               -maxdepth 1 \
               -type f \
               \( \
-                -name "libclang-cpp*.so*" \
-                -o -name "libclang-cpp*.a" \
-                -o -name "libclang*.so*" \
+                -name "libclang-cpp*.a" \
                 -o -name "libclang*.a" \
               \) \
               -print \
-              -quit
+              | grep -v "libclang-cpp.so" \
+              | head -n 1
           )"
 
-          if [ -z "$CLANG_LIB" ]; then
-            echo "ERROR: No Clang library was installed."
+          if [ -z "$CLANG_ARCHIVE" ]; then
+            echo
+            echo "ERROR: No Clang static archive was installed."
+
+            echo
+            echo "Available clang files:"
+            find "$INSTALL/lib" \
+              -maxdepth 1 \
+              -type f \
+              -name "*clang*" \
+              -print \
+              | sort \
+              || true
+
             exit 1
           fi
 
           echo
-          echo "Selected Clang library:"
-          echo "$CLANG_LIB"
+          echo "Selected Clang archive:"
+          echo "$CLANG_ARCHIVE"
 
           echo
-          echo "File information:"
-          file "$CLANG_LIB"
+          echo "Archive type:"
+          file "$CLANG_ARCHIVE"
+
+          MEMBER="$(
+            ar t "$CLANG_ARCHIVE" \
+              | grep -E '\.o$' \
+              | head -n 1
+          )"
+
+          if [ -z "$MEMBER" ]; then
+            echo
+            echo "ERROR: No ELF object member was found in Clang archive."
+            exit 1
+          fi
+
+          TMPDIR="$(mktemp -d)"
+
+          cleanup_clang() {
+            rm -rf "$TMPDIR"
+          }
+
+          trap cleanup_clang EXIT
+
+          ar p "$CLANG_ARCHIVE" "$MEMBER" \
+            > "$TMPDIR/member.o"
+
+          test -s "$TMPDIR/member.o"
+
+          echo
+          echo "Clang archive member:"
+          echo "$MEMBER"
 
           echo
           echo "ELF information:"
-          readelf -h "$CLANG_LIB" | grep -E \
-            "Class:|Machine:|Type:"
 
-          file "$CLANG_LIB" | grep -Ei \
-            "aarch64|ARM aarch64"
+          readelf -h "$TMPDIR/member.o" \
+            | grep -E \
+              "Class:|Type:|Machine:"
+
+          MACHINE="$(
+            readelf -h "$TMPDIR/member.o" \
+              | awk -F: '/Machine:/ {
+                gsub(/^[ \t]+/, "", $2);
+                print $2
+              }'
+          )"
+
+          if [ "$MACHINE" != "AArch64" ]; then
+            echo
+            echo "ERROR: Clang object is not AArch64."
+            echo "Detected machine: $MACHINE"
+            exit 1
+          fi
 
           echo
-          echo "Android Clang architecture verification: PASSED"
+          echo "Clang object architecture: AArch64"
+          echo "Clang ARM64 architecture verification: PASSED"
 
 
       # ============================================================
@@ -742,7 +893,7 @@ jobs:
       - name: Verify LLVM and Clang CMake packages
         shell: bash
         run: |
-          set -eux
+          set -u
 
           INSTALL="$GITHUB_WORKSPACE/llvm-android-install"
 
@@ -767,12 +918,28 @@ jobs:
           )"
 
           if [ -z "$LLVM_CONFIG" ]; then
+            echo
             echo "ERROR: LLVMConfig.cmake was not installed."
+
+            find "$INSTALL" \
+              -type f \
+              -name "*LLVM*Config.cmake" \
+              -print \
+              || true
+
             exit 1
           fi
 
           if [ -z "$CLANG_CONFIG" ]; then
+            echo
             echo "ERROR: ClangConfig.cmake was not installed."
+
+            find "$INSTALL" \
+              -type f \
+              -name "*Clang*Config.cmake" \
+              -print \
+              || true
+
             exit 1
           fi
 
@@ -796,17 +963,18 @@ jobs:
 
 
       # ============================================================
-      # ANDROID ARM64 SMOKE TEST
+      # ANDROID ARM64 COMPILER SMOKE TEST
       # ============================================================
 
       - name: Android ARM64 compiler smoke test
         shell: bash
         run: |
-          set -eux
+          set -u
+          set -o pipefail
 
           CLANG="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
-
           TESTDIR="$GITHUB_WORKSPACE/android-llvm-smoke"
+          LOG="$GITHUB_WORKSPACE/android-llvm-smoke.log"
 
           rm -rf "$TESTDIR"
           mkdir -p "$TESTDIR"
@@ -824,16 +992,36 @@ jobs:
           }
           EOF
 
+          echo "=========================================="
+          echo " Android ARM64 Smoke Test"
+          echo "=========================================="
+
+          set +e
+
           "$CLANG" \
             --target=aarch64-linux-android${ANDROID_API} \
             -fPIE \
             -pie \
             "$TESTDIR/test.c" \
-            -o "$TESTDIR/test-arm64"
+            -o "$TESTDIR/test-arm64" \
+            > "$LOG" 2>&1
 
-          echo "=========================================="
-          echo " Android ARM64 Smoke Test"
-          echo "=========================================="
+          STATUS=$?
+
+          set -e
+
+          if [ "$STATUS" -ne 0 ]; then
+            echo
+            echo "=========================================="
+            echo " ARM64 SMOKE TEST FAILED"
+            echo "=========================================="
+
+            cat "$LOG"
+
+            exit "$STATUS"
+          fi
+
+          test -f "$TESTDIR/test-arm64"
 
           echo
           echo "Binary:"
@@ -841,14 +1029,24 @@ jobs:
 
           echo
           echo "ELF:"
-          readelf -h "$TESTDIR/test-arm64" | grep -E \
-            "Class:|Machine:|Type:"
+          readelf -h "$TESTDIR/test-arm64" \
+            | grep -E \
+              "Class:|Machine:|Type:"
 
-          echo
-          echo "Architecture:"
+          MACHINE="$(
+            readelf -h "$TESTDIR/test-arm64" \
+              | awk -F: '/Machine:/ {
+                gsub(/^[ \t]+/, "", $2);
+                print $2
+              }'
+          )"
 
-          file "$TESTDIR/test-arm64" | grep -Ei \
-            "aarch64|ARM aarch64"
+          if [ "$MACHINE" != "AArch64" ]; then
+            echo
+            echo "ERROR: Smoke-test binary is not AArch64."
+            echo "Detected machine: $MACHINE"
+            exit 1
+          fi
 
           echo
           echo "Android ARM64 compiler smoke test: PASSED"
@@ -870,6 +1068,7 @@ jobs:
             llvm-android-install.log
             llvm-android-build
             llvm-android-install
+            android-llvm-smoke.log
             android-llvm-smoke
           if-no-files-found: warn
 
@@ -880,6 +1079,7 @@ jobs:
 
       - name: LLVM Android bootstrap complete
         if: success()
+        shell: bash
         run: |
           echo "=========================================="
           echo " LLVM ANDROID BOOTSTRAP SUCCESS"
@@ -895,6 +1095,7 @@ jobs:
           echo "Host clang-tblgen: BUILT"
           echo "LLVM ARM64: BUILT"
           echo "Clang ARM64: BUILT"
+          echo "LLVM headers: VERIFIED"
           echo "LLVM ARM64 architecture: VERIFIED"
           echo "Clang ARM64 architecture: VERIFIED"
           echo "LLVM CMake package: VERIFIED"
