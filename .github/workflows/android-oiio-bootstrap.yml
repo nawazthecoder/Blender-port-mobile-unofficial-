@@ -399,16 +399,31 @@ jobs:
           cmake --build "$BUILD/opencolorio" 2>&1 | tee "$LOGS/ocio-build.log"
           cmake --install "$BUILD/opencolorio" 2>&1 | tee "$LOGS/ocio-install.log"
 
+      - name: Validate Android prefix package files
+        shell: bash
+        run: |
+          set -euxo pipefail
+          
+          for f in \
+            "$PREFIX/lib/cmake/Imath/ImathConfig.cmake" \
+            "$PREFIX/lib/cmake/OpenEXR/OpenEXRConfig.cmake" \
+            "$PREFIX/lib/cmake/OpenColorIO/OpenColorIOConfig.cmake"
+          do
+            if [ ! -f "$f" ]; then
+              echo "Missing CMake package: $f"
+              find "$PREFIX" -maxdepth 4 -type f \( -name '*.cmake' -o -name '*.pc' \) -print | sort
+              exit 1
+            fi
+          done
+
       - name: Configure OpenImageIO against only our Android prefix
         shell: bash
         run: |
           set -euxo pipefail
 
-          # Critical fix:
-          # DO NOT use OpenImageIO's automatic missing-dependency builder here.
-          # It previously cloned Imath 3.1.10 and failed to expose ImathConfig.cmake.
-          # Every required package is now explicitly built for arm64-v8a and supplied
-          # through this one CMake prefix.
+          # Correct OIIO option name: OIIO_BUILD_MISSING_DEPS, not OpenImageIO_BUILD_MISSING_DEPS
+          # Also pin CMake package discovery to the Android prefix so it does not accidentally
+          # pick up host packages or trigger dependency auto-fetch logic.
           cmake -S "$SRC/OpenImageIO" -B "$BUILD/openimageio" -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
             -DANDROID_ABI=arm64-v8a \
@@ -419,7 +434,11 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DCMAKE_INSTALL_LIBDIR=lib \
             -DCMAKE_PREFIX_PATH="$PREFIX" \
-            -DOpenImageIO_BUILD_MISSING_DEPS="" \
+            -DCMAKE_FIND_ROOT_PATH="$PREFIX" \
+            -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
+            -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+            -DOIIO_BUILD_MISSING_DEPS=OFF \
             -DBUILD_SHARED_LIBS=OFF \
             -DLINKSTATIC=ON \
             -DEMBEDPLUGINS=ON \
@@ -442,7 +461,10 @@ jobs:
             -DUSE_FFMPEG=OFF \
             -DUSE_OPENCV=OFF \
             -DImath_ROOT="$PREFIX" \
+            -DImath_DIR="$PREFIX/lib/cmake/Imath" \
             -DOpenEXR_ROOT="$PREFIX" \
+            -DOpenEXR_DIR="$PREFIX/lib/cmake/OpenEXR" \
+            -DOpenColorIO_ROOT="$PREFIX" \
             -DOpenColorIO_DIR="$PREFIX/lib/cmake/OpenColorIO" \
             -DJPEG_ROOT="$PREFIX" \
             -Dlibjpeg-turbo_ROOT="$PREFIX" \
