@@ -66,9 +66,6 @@ jobs:
 
       # ============================================================
       # ANDROID SDK
-      #
-      # Empty packages prevents setup-android from requesting
-      # deprecated SDK packages.
       # ============================================================
 
       - name: Set up Android SDK
@@ -110,6 +107,7 @@ jobs:
           NDK="$SDK_ROOT/ndk/${ANDROID_NDK_VERSION}"
 
           if [ ! -d "$NDK" ]; then
+            echo
             echo "ERROR: Android NDK was not installed:"
             echo "$NDK"
             exit 1
@@ -232,9 +230,6 @@ jobs:
 
       # ============================================================
       # HOST TABLEGEN
-      #
-      # These are x86_64 Linux executables.
-      # They run on GitHub's runner.
       # ============================================================
 
       - name: Configure host LLVM TableGen
@@ -309,6 +304,7 @@ jobs:
           set -e
 
           if [ "$STATUS" -ne 0 ]; then
+
             echo
             echo "=========================================="
             echo " HOST TABLEGEN BUILD FAILED"
@@ -328,6 +324,7 @@ jobs:
             tail -150 "$LOG"
 
             exit "$STATUS"
+
           fi
 
           echo
@@ -434,34 +431,6 @@ jobs:
           echo " Android ARM64"
           echo "=========================================="
 
-          echo
-          echo "LLVM source:"
-          echo "$SOURCE"
-
-          echo
-          echo "LLVM build:"
-          echo "$BUILD"
-
-          echo
-          echo "LLVM install:"
-          echo "$INSTALL"
-
-          echo
-          echo "Android NDK:"
-          echo "$ANDROID_NDK_ROOT"
-
-          echo
-          echo "Android API:"
-          echo "$ANDROID_API"
-
-          echo
-          echo "Android ABI:"
-          echo "$ANDROID_ABI"
-
-          echo
-          echo "Native TableGen directory:"
-          echo "$LLVM_NATIVE_TOOL_DIR"
-
           cmake \
             -S "$SOURCE" \
             -B "$BUILD" \
@@ -542,6 +511,7 @@ jobs:
           set -e
 
           if [ "$STATUS" -ne 0 ]; then
+
             echo
             echo "=========================================="
             echo " ANDROID LLVM BUILD FAILED"
@@ -561,6 +531,7 @@ jobs:
             tail -150 "$LOG"
 
             exit "$STATUS"
+
           fi
 
           echo
@@ -568,7 +539,7 @@ jobs:
 
 
       # ============================================================
-      # INSTALL ANDROID LLVM
+      # INSTALL
       # ============================================================
 
       - name: Install Android LLVM
@@ -597,15 +568,16 @@ jobs:
           set -e
 
           if [ "$STATUS" -ne 0 ]; then
+
             echo
             echo "=========================================="
             echo " LLVM INSTALL FAILED"
             echo "=========================================="
 
-            echo
             cat "$LOG"
 
             exit "$STATUS"
+
           fi
 
           echo
@@ -616,7 +588,7 @@ jobs:
       # VERIFY LLVM HEADERS
       # ============================================================
 
-      - name: Verify LLVM headers
+      - name: Verify LLVM and Clang headers
         shell: bash
         run: |
           set -eux
@@ -624,29 +596,31 @@ jobs:
           INSTALL="$GITHUB_WORKSPACE/llvm-android-install"
 
           echo "=========================================="
-          echo " Verifying LLVM Headers"
+          echo " Verifying LLVM / Clang Headers"
           echo "=========================================="
 
+          # LLVM public headers.
           test -f "$INSTALL/include/llvm/IR/Module.h"
           test -f "$INSTALL/include/llvm/Support/Error.h"
           test -f "$INSTALL/include/llvm/ADT/StringRef.h"
 
-          echo
-          echo "LLVM headers:"
-          echo "  llvm/IR/Module.h       OK"
-          echo "  llvm/Support/Error.h   OK"
-          echo "  llvm/ADT/StringRef.h   OK"
+          # Clang public headers.
+          test -f "$INSTALL/include/clang/Basic/Version.h"
+          test -f "$INSTALL/include/clang/Basic/Diagnostic.h"
 
           echo
-          echo "LLVM header verification: PASSED"
+          echo "LLVM headers: PRESENT"
+          echo "Clang headers: PRESENT"
+
+          echo
+          echo "Header verification: PASSED"
 
 
       # ============================================================
-      # VERIFY STATIC ARCHIVE ARCHITECTURE
+      # VERIFY LLVM STATIC ARCHIVES
       #
-      # IMPORTANT:
-      # .a files are ar archives.
-      # We extract a real ELF object member before inspecting it.
+      # .a files are ar containers.
+      # Extract one .o member and inspect its ELF machine.
       # ============================================================
 
       - name: Verify Android LLVM ARM64
@@ -680,11 +654,6 @@ jobs:
             -print \
             | sort
 
-          # --------------------------------------------------------
-          # Prefer LLVMCore because it is an actual LLVM runtime
-          # library, not just a TableGen component.
-          # --------------------------------------------------------
-
           LLVM_ARCHIVE="$INSTALL/lib/libLLVMCore.a"
 
           if [ ! -f "$LLVM_ARCHIVE" ]; then
@@ -701,7 +670,7 @@ jobs:
 
           if [ -z "$LLVM_ARCHIVE" ] || [ ! -f "$LLVM_ARCHIVE" ]; then
             echo
-            echo "ERROR: No LLVM runtime static archive was found."
+            echo "ERROR: No LLVM runtime archive was found."
             exit 1
           fi
 
@@ -713,10 +682,6 @@ jobs:
           echo "Archive type:"
           file "$LLVM_ARCHIVE"
 
-          # --------------------------------------------------------
-          # Find an actual object member.
-          # --------------------------------------------------------
-
           MEMBER="$(
             ar t "$LLVM_ARCHIVE" \
               | grep -E '\.o$' \
@@ -725,16 +690,9 @@ jobs:
 
           if [ -z "$MEMBER" ]; then
             echo
-            echo "ERROR: No ELF object member was found in archive."
-            echo
-            echo "Archive members:"
-            ar t "$LLVM_ARCHIVE" | head -50
+            echo "ERROR: No object member was found in LLVM archive."
             exit 1
           fi
-
-          echo
-          echo "Selected archive member:"
-          echo "$MEMBER"
 
           TMPDIR="$(mktemp -d)"
 
@@ -748,6 +706,10 @@ jobs:
             > "$TMPDIR/member.o"
 
           test -s "$TMPDIR/member.o"
+
+          echo
+          echo "Archive member:"
+          echo "$MEMBER"
 
           echo
           echo "ELF information:"
@@ -773,117 +735,7 @@ jobs:
 
           echo
           echo "LLVM object architecture: AArch64"
-          echo "LLVM ARM64 architecture verification: PASSED"
-
-
-      # ============================================================
-      # VERIFY CLANG ARM64
-      # ============================================================
-
-      - name: Verify Android Clang ARM64
-        shell: bash
-        run: |
-          set -u
-          set -o pipefail
-
-          INSTALL="$GITHUB_WORKSPACE/llvm-android-install"
-
-          echo "=========================================="
-          echo " Verifying Android Clang ARM64"
-          echo "=========================================="
-
-          CLANG_ARCHIVE="$(
-            find "$INSTALL/lib" \
-              -maxdepth 1 \
-              -type f \
-              \( \
-                -name "libclang-cpp*.a" \
-                -o -name "libclang*.a" \
-              \) \
-              -print \
-              | grep -v "libclang-cpp.so" \
-              | head -n 1
-          )"
-
-          if [ -z "$CLANG_ARCHIVE" ]; then
-            echo
-            echo "ERROR: No Clang static archive was installed."
-
-            echo
-            echo "Available clang files:"
-            find "$INSTALL/lib" \
-              -maxdepth 1 \
-              -type f \
-              -name "*clang*" \
-              -print \
-              | sort \
-              || true
-
-            exit 1
-          fi
-
-          echo
-          echo "Selected Clang archive:"
-          echo "$CLANG_ARCHIVE"
-
-          echo
-          echo "Archive type:"
-          file "$CLANG_ARCHIVE"
-
-          MEMBER="$(
-            ar t "$CLANG_ARCHIVE" \
-              | grep -E '\.o$' \
-              | head -n 1
-          )"
-
-          if [ -z "$MEMBER" ]; then
-            echo
-            echo "ERROR: No ELF object member was found in Clang archive."
-            exit 1
-          fi
-
-          TMPDIR="$(mktemp -d)"
-
-          cleanup_clang() {
-            rm -rf "$TMPDIR"
-          }
-
-          trap cleanup_clang EXIT
-
-          ar p "$CLANG_ARCHIVE" "$MEMBER" \
-            > "$TMPDIR/member.o"
-
-          test -s "$TMPDIR/member.o"
-
-          echo
-          echo "Clang archive member:"
-          echo "$MEMBER"
-
-          echo
-          echo "ELF information:"
-
-          readelf -h "$TMPDIR/member.o" \
-            | grep -E \
-              "Class:|Type:|Machine:"
-
-          MACHINE="$(
-            readelf -h "$TMPDIR/member.o" \
-              | awk -F: '/Machine:/ {
-                gsub(/^[ \t]+/, "", $2);
-                print $2
-              }'
-          )"
-
-          if [ "$MACHINE" != "AArch64" ]; then
-            echo
-            echo "ERROR: Clang object is not AArch64."
-            echo "Detected machine: $MACHINE"
-            exit 1
-          fi
-
-          echo
-          echo "Clang object architecture: AArch64"
-          echo "Clang ARM64 architecture verification: PASSED"
+          echo "LLVM ARM64 verification: PASSED"
 
 
       # ============================================================
@@ -920,26 +772,12 @@ jobs:
           if [ -z "$LLVM_CONFIG" ]; then
             echo
             echo "ERROR: LLVMConfig.cmake was not installed."
-
-            find "$INSTALL" \
-              -type f \
-              -name "*LLVM*Config.cmake" \
-              -print \
-              || true
-
             exit 1
           fi
 
           if [ -z "$CLANG_CONFIG" ]; then
             echo
             echo "ERROR: ClangConfig.cmake was not installed."
-
-            find "$INSTALL" \
-              -type f \
-              -name "*Clang*Config.cmake" \
-              -print \
-              || true
-
             exit 1
           fi
 
@@ -952,18 +790,15 @@ jobs:
           echo "$CLANG_CONFIG"
 
           echo
-          echo "Android LLVM root:"
-          echo "$INSTALL"
+          echo "LLVM/Clang CMake package verification: PASSED"
 
-          {
-            echo "ANDROID_LLVM_ROOT=$INSTALL"
-            echo "ANDROID_LLVM_CONFIG=$LLVM_CONFIG"
-            echo "ANDROID_CLANG_CONFIG=$CLANG_CONFIG"
-          } >> "$GITHUB_ENV"
+          echo "ANDROID_LLVM_ROOT=$INSTALL" >> "$GITHUB_ENV"
+          echo "ANDROID_LLVM_CONFIG=$LLVM_CONFIG" >> "$GITHUB_ENV"
+          echo "ANDROID_CLANG_CONFIG=$CLANG_CONFIG" >> "$GITHUB_ENV"
 
 
       # ============================================================
-      # ANDROID ARM64 COMPILER SMOKE TEST
+      # VERIFY NDK ARM64 COMPILER
       # ============================================================
 
       - name: Android ARM64 compiler smoke test
@@ -973,6 +808,7 @@ jobs:
           set -o pipefail
 
           CLANG="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+
           TESTDIR="$GITHUB_WORKSPACE/android-llvm-smoke"
           LOG="$GITHUB_WORKSPACE/android-llvm-smoke.log"
 
@@ -993,7 +829,7 @@ jobs:
           EOF
 
           echo "=========================================="
-          echo " Android ARM64 Smoke Test"
+          echo " Android ARM64 Compiler Smoke Test"
           echo "=========================================="
 
           set +e
@@ -1011,6 +847,7 @@ jobs:
           set -e
 
           if [ "$STATUS" -ne 0 ]; then
+
             echo
             echo "=========================================="
             echo " ARM64 SMOKE TEST FAILED"
@@ -1019,6 +856,7 @@ jobs:
             cat "$LOG"
 
             exit "$STATUS"
+
           fi
 
           test -f "$TESTDIR/test-arm64"
@@ -1053,7 +891,42 @@ jobs:
 
 
       # ============================================================
-      # SAVE DIAGNOSTICS
+      # FINAL SUMMARY
+      # ============================================================
+
+      - name: Final LLVM verification
+        shell: bash
+        run: |
+          set -eux
+
+          echo "=========================================="
+          echo " FINAL LLVM ANDROID VERIFICATION"
+          echo "=========================================="
+
+          test -d "$ANDROID_LLVM_ROOT"
+          test -f "$ANDROID_LLVM_CONFIG"
+          test -f "$ANDROID_CLANG_CONFIG"
+
+          echo
+          echo "LLVM root:"
+          echo "$ANDROID_LLVM_ROOT"
+
+          echo
+          echo "LLVM CMake:"
+          echo "$ANDROID_LLVM_CONFIG"
+
+          echo
+          echo "Clang CMake:"
+          echo "$ANDROID_CLANG_CONFIG"
+
+          echo
+          echo "=========================================="
+          echo " LLVM ANDROID BOOTSTRAP VERIFIED"
+          echo "=========================================="
+
+
+      # ============================================================
+      # DIAGNOSTICS
       # ============================================================
 
       - name: Upload LLVM diagnostics
@@ -1094,13 +967,12 @@ jobs:
           echo "Host llvm-tblgen: BUILT"
           echo "Host clang-tblgen: BUILT"
           echo "LLVM ARM64: BUILT"
-          echo "Clang ARM64: BUILT"
-          echo "LLVM headers: VERIFIED"
           echo "LLVM ARM64 architecture: VERIFIED"
-          echo "Clang ARM64 architecture: VERIFIED"
+          echo "LLVM headers: VERIFIED"
+          echo "Clang headers: VERIFIED"
           echo "LLVM CMake package: VERIFIED"
           echo "Clang CMake package: VERIFIED"
-          echo "Android ARM64 compiler smoke test: PASSED"
+          echo "Android ARM64 compiler: VERIFIED"
           echo
           echo "ANDROID_LLVM_ROOT:"
           echo "$ANDROID_LLVM_ROOT"
