@@ -10,7 +10,7 @@ env:
   ANDROID_API: "29"
   ANDROID_NDK_VERSION: "27.3.13750724"
 
-  # Blender 5.2.2 dependency set
+  # Blender 5.2.2 dependency versions
   OIIO_VERSION: "v3.1.13.1"
   IMATH_VERSION: "v3.2.2"
   OPENEXR_VERSION: "v3.4.10"
@@ -85,10 +85,17 @@ jobs:
             android-oiio/logs \
             android-oiio/package
 
-          echo "SRC=$GITHUB_WORKSPACE/android-oiio/src" >> "$GITHUB_ENV"
-          echo "BUILD=$GITHUB_WORKSPACE/android-oiio/build" >> "$GITHUB_ENV"
-          echo "PREFIX=$GITHUB_WORKSPACE/android-oiio/prefix" >> "$GITHUB_ENV"
-          echo "LOGS=$GITHUB_WORKSPACE/android-oiio/logs" >> "$GITHUB_ENV"
+          echo "SRC=$GITHUB_WORKSPACE/android-oiio/src" \
+            >> "$GITHUB_ENV"
+
+          echo "BUILD=$GITHUB_WORKSPACE/android-oiio/build" \
+            >> "$GITHUB_ENV"
+
+          echo "PREFIX=$GITHUB_WORKSPACE/android-oiio/prefix" \
+            >> "$GITHUB_ENV"
+
+          echo "LOGS=$GITHUB_WORKSPACE/android-oiio/logs" \
+            >> "$GITHUB_ENV"
 
           echo "TOOLCHAIN=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
             >> "$GITHUB_ENV"
@@ -325,12 +332,10 @@ jobs:
             -DCMAKE_PREFIX_PATH="$PREFIX" \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
-            \
             -DBUILD_TESTING:BOOL=OFF \
             -DOPENEXR_TEST_LIBRARIES:BOOL=OFF \
             -DOPENEXR_TEST_TOOLS:BOOL=OFF \
             -DOPENEXR_TEST_PYTHON:BOOL=OFF \
-            \
             -DOPENEXR_INSTALL:BOOL=ON \
             -DOPENEXR_BUILD_LIBS:BOOL=ON \
             -DOPENEXR_BUILD_TOOLS:BOOL=OFF \
@@ -339,13 +344,11 @@ jobs:
             -DOPENEXR_BUILD_EXAMPLES:BOOL=OFF \
             -DOPENEXR_BUILD_PYTHON:BOOL=OFF \
             -DOPENEXR_BUILD_OSS_FUZZ:BOOL=OFF \
-            \
             -DOPENEXR_FORCE_INTERNAL_DEFLATE:BOOL=ON \
             -DOPENEXR_FORCE_INTERNAL_OPENJPH:BOOL=ON \
             -DOPENEXR_FORCE_INTERNAL_IMATH:BOOL=OFF \
             -DOPENEXR_ENABLE_THREADING:BOOL=ON \
             -DOPENEXR_USE_TBB:BOOL=OFF \
-            \
             -DImath_DIR="$PREFIX/lib/cmake/Imath" \
             2>&1 | tee "$LOGS/openexr-configure.log"
 
@@ -409,12 +412,17 @@ jobs:
         run: |
           set -eux
 
-          if find "$BUILD/openexr" \
+          TEST_FILE="$(
+            find "$BUILD/openexr" \
               -path '*/src/test/*' \
               -type f \
-              | head -n 1 \
-              | grep -q .; then
-            echo "ERROR: OpenEXR test files were generated."
+              -print \
+              -quit
+          )"
+
+          if [ -n "$TEST_FILE" ]; then
+            echo "ERROR: OpenEXR test files were generated:"
+            echo "$TEST_FILE"
             exit 1
           fi
 
@@ -479,9 +487,7 @@ jobs:
             -DCMAKE_PREFIX_PATH="$PREFIX" \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
-            \
             -DOCIO_INSTALL_EXT_PACKAGES=ALL \
-            \
             -DOCIO_BUILD_APPS=OFF \
             -DOCIO_BUILD_OPENFX=OFF \
             -DOCIO_BUILD_NUKE=OFF \
@@ -491,7 +497,6 @@ jobs:
             -DOCIO_BUILD_PYTHON=OFF \
             -DOCIO_BUILD_JAVA=OFF \
             -DOCIO_USE_OIIO_FOR_APPS=OFF \
-            \
             -DImath_DIR="$PREFIX/lib/cmake/Imath" \
             2>&1 | tee "$LOGS/opencolorio-configure.log"
 
@@ -513,12 +518,16 @@ jobs:
 
           echo
           echo "OpenColorIO external dependency files:"
-          find "$BUILD/opencolorio/ext/dist" \
-            -maxdepth 4 \
-            -type f \
-            2>/dev/null \
-            | sort \
-            | head -n 300 || true
+
+          if [ -d "$BUILD/opencolorio/ext/dist" ]; then
+            find "$BUILD/opencolorio/ext/dist" \
+              -maxdepth 4 \
+              -type f \
+              -print \
+              | sort
+          else
+            echo "No OCIO ext/dist directory."
+          fi
 
       - name: Configure OpenImageIO
         shell: bash
@@ -543,11 +552,9 @@ jobs:
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
             -DLINKSTATIC=ON \
-            \
             -DOpenImageIO_BUILD_MISSING_DEPS=OFF \
             -DOIIO_BUILD_TESTS=OFF \
             -DOIIO_BUILD_TOOLS=OFF \
-            \
             -DUSE_PYTHON=OFF \
             -DUSE_QT=OFF \
             -DUSE_OPENGL=OFF \
@@ -561,21 +568,17 @@ jobs:
             -DUSE_LIBHEIF=OFF \
             -DUSE_OPENJPEG=OFF \
             -DUSE_FREETYPE=OFF \
-            \
             -DUSE_EXTERNAL_PUGIXML=OFF \
             -DOIIO_USE_COMPILED_FMT=OFF \
             -DOIIO_INTERNALIZE_FMT=ON \
-            \
             -DZLIB_ROOT="$PREFIX" \
             -DPNG_ROOT="$PREFIX" \
             -DTIFF_ROOT="$PREFIX" \
             -DCMAKE_FIND_ROOT_PATH="$PREFIX" \
-            \
             -DImath_DIR="$PREFIX/lib/cmake/Imath" \
             -DOpenEXR_DIR="$PREFIX/lib/cmake/OpenEXR" \
             -DOpenColorIO_DIR="$PREFIX/lib/cmake/OpenColorIO" \
             -Dfmt_DIR="$PREFIX/lib/cmake/fmt" \
-            \
             2>&1 | tee "$LOGS/oiio-configure.log"
 
       - name: Verify OpenImageIO configuration
@@ -610,6 +613,7 @@ jobs:
 
           echo
           echo "Installed libraries:"
+
           find "$PREFIX/lib" \
             -maxdepth 1 \
             -type f \
@@ -627,8 +631,7 @@ jobs:
                 -type f \
                 -name "$pattern" \
                 -print \
-                | sort \
-                | head -n 1
+                -quit
             )"
 
             if [ -z "$result" ]; then
@@ -636,12 +639,14 @@ jobs:
               echo "ERROR: Missing library matching: $pattern"
               echo
               echo "Available static libraries:"
+
               find "$PREFIX/lib" \
                 -maxdepth 1 \
                 -type f \
                 -name '*.a' \
                 -print \
                 | sort
+
               exit 1
             fi
 
@@ -669,27 +674,40 @@ jobs:
               ar x "$archive"
             )
 
+            # IMPORTANT:
+            # Do NOT use find | head here.
+            # With pipefail that can turn a successful find into SIGPIPE.
             obj="$(
               find "$tmp" \
                 -type f \
                 -name '*.o' \
                 -print \
-                | head -n 1
+                -quit
             )"
 
             if [ -z "$obj" ]; then
-              echo "ERROR: No ELF object found inside $archive"
+              echo "ERROR: No object files found inside:"
+              echo "$archive"
               rm -rf "$tmp"
               exit 1
             fi
 
-            readelf -h "$obj" > "$tmp/header.txt"
+            echo
+            echo "Object selected:"
+            echo "$obj"
 
-            cat "$tmp/header.txt"
+            echo
+            echo "ELF header:"
 
-            grep -q 'Class:.*ELF64' "$tmp/header.txt"
-            grep -q 'Machine:.*AArch64' "$tmp/header.txt"
+            readelf -h "$obj"
 
+            readelf -h "$obj" |
+              grep -q 'Class:.*ELF64'
+
+            readelf -h "$obj" |
+              grep -q 'Machine:.*AArch64'
+
+            echo
             echo "PASS: $name is ELF64 AArch64"
 
             rm -rf "$tmp"
@@ -707,15 +725,69 @@ jobs:
           echo "  OpenColorIO = $OCIO_LIB"
           echo "  OpenImageIO = $OIIO_LIB"
 
-          check_archive "$IMATH_LIB" "Imath"
-          check_archive "$OPENEXR_LIB" "OpenEXR"
-          check_archive "$OCIO_LIB" "OpenColorIO"
-          check_archive "$OIIO_LIB" "OpenImageIO"
+          check_archive \
+            "$IMATH_LIB" \
+            "Imath"
+
+          check_archive \
+            "$OPENEXR_LIB" \
+            "OpenEXR"
+
+          check_archive \
+            "$OCIO_LIB" \
+            "OpenColorIO"
+
+          check_archive \
+            "$OIIO_LIB" \
+            "OpenImageIO"
 
           echo
           echo "=========================================="
           echo " ARM64 verification PASSED"
           echo "=========================================="
+
+      - name: Verify all important dependency libraries
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "========== Important Android libraries =========="
+
+          required_patterns=(
+            'libImath*.a'
+            'libOpenEXR*.a'
+            'libOpenEXRCore*.a'
+            'libOpenEXRUtil*.a'
+            'libOpenColorIO*.a'
+            'libOpenImageIO*.a'
+            'libOpenImageIO_Util*.a'
+            'libfmt*.a'
+            'libjpeg*.a'
+            'libpng*.a'
+            'libtiff*.a'
+            'libz*.a'
+          )
+
+          for pattern in "${required_patterns[@]}"; do
+            result="$(
+              find "$PREFIX/lib" \
+                -maxdepth 1 \
+                -type f \
+                -name "$pattern" \
+                -print \
+                -quit
+            )"
+
+            if [ -z "$result" ]; then
+              echo "ERROR: Missing $pattern"
+              exit 1
+            fi
+
+            echo "FOUND: $result"
+          done
+
+          echo
+          echo "All important dependency libraries are present."
 
       - name: Show final prefix
         shell: bash
@@ -727,8 +799,8 @@ jobs:
           find "$PREFIX" \
             -maxdepth 4 \
             -type f \
-            | sort \
-            | head -n 800
+            -print \
+            | sort
 
       - name: Package Android OIIO prefix
         shell: bash
