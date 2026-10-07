@@ -1,4 +1,4 @@
-name: Android LLVM Bootstrap
+name: Android LLVM/Clang Bootstrap
 
 on:
   workflow_dispatch:
@@ -8,523 +8,324 @@ permissions:
 
 env:
   LLVM_VERSION: "20.1.8"
-  NDK_VERSION: "27.3.13750724"
   ANDROID_API: "29"
-  ABI_NAME: "arm64-v8a"
-  WORK: /mnt/llvm-work
-  CCACHE_DIR: /mnt/llvm-work/ccache
-  CCACHE_MAXSIZE: 4G
-
-defaults:
-  run:
-    shell: bash
+  ANDROID_NDK_VERSION: "27.3.13750724"
+  ANDROID_ABI: "arm64-v8a"
+  TARGET_TRIPLE: "aarch64-linux-android29"
 
 jobs:
-  llvm-android:
-    name: LLVM + Clang ${{ vars.LLVM_VERSION || '20.1.8' }} for Android arm64-v8a
+  build-llvm-android:
     runs-on: ubuntu-24.04
-    timeout-minutes: 350
 
     steps:
-      - name: Free disk space and prepare work directory
-        run: |
-          set -eu
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost \
-            /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL || true
-          sudo mkdir -p "$WORK/logs" "$WORK/ccache"
-          sudo chown -R "$(id -un):$(id -gn)" "$WORK"
-          df -h / /mnt
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Install host packages
-        run: |
-          set -eu
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            ninja-build ccache zstd unzip curl git python3 build-essential cmake
-          cmake --version
-          ninja --version
-          gcc --version | head -n1
-
-      - name: Restore ccache
-        uses: actions/cache/restore@v4
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
         with:
-          path: ${{ env.WORK }}/ccache
-          key: llvm-android-${{ env.LLVM_VERSION }}-${{ github.run_id }}
-          restore-keys: |
-            llvm-android-${{ env.LLVM_VERSION }}-
+          packages: ""
 
-      - name: Locate or install Android NDK
+      - name: Install Android SDK / NDK
+        shell: bash
         run: |
-          set -eu
-          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
-          NDK="$SDK/ndk/$NDK_VERSION"
-          if [ ! -f "$NDK/source.properties" ]; then
-            echo "NDK $NDK_VERSION not preinstalled; downloading r27d (= 27.3.13750724)"
-            curl -fL --retry 5 -o "$WORK/ndk.zip" \
-              https://dl.google.com/android/repository/android-ndk-r27d-linux.zip
-            unzip -q "$WORK/ndk.zip" -d "$WORK"
-            rm -f "$WORK/ndk.zip"
-            NDK="$WORK/android-ndk-r27d"
-          fi
-          cat "$NDK/source.properties"
-          if ! grep -qF "$NDK_VERSION" "$NDK/source.properties"; then
-            echo "::error::NDK at $NDK is not version $NDK_VERSION"
-            exit 1
-          fi
-          test -f "$NDK/build/cmake/android.toolchain.cmake"
-          echo "ANDROID_NDK_HOME=$NDK" >> "$GITHUB_ENV"
-          echo "NDK OK: $NDK"
+          set -eux
 
-      - name: Write shared helper script
+          SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+
+          sdkmanager \
+            --sdk_root="$SDK_ROOT" \
+            "platform-tools" \
+            "platforms;android-${ANDROID_API}" \
+            "ndk;${ANDROID_NDK_VERSION}"
+
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$SDK_ROOT/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Install build dependencies
+        shell: bash
         run: |
-          set -eu
-          cat > "$WORK/ci.sh" <<'EOF'
-          export LOGS="$WORK/logs"
-          export SRC="$WORK/llvm-project"
-          export HOST_BUILD="$WORK/build-host"
-          export ANDROID_BUILD="$WORK/build-android"
-          export INSTALL="$WORK/llvm-android-install"
-          export TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          set -eux
 
-          # Print the tail of a log plus the interesting error lines.
-          show_log() {
-            f="$1"
-            [ -f "$f" ] || { echo "(no log at $f)"; return 0; }
-            echo "::group::Last 150 lines of $f"
-            tail -n 150 "$f" || true
-            echo "::endgroup::"
-            echo "::group::Error-looking lines in $f (first 60)"
-            grep -nE "error:|FAILED:|CMake Error|undefined reference|fatal error|ld.lld: error" "$f" | head -n 60 || true
-            echo "::endgroup::"
-          }
+          sudo apt-get update
 
-          # Run a long command in the background, log it fully, print one
-          # progress line every 2 minutes, and dump diagnostics on failure.
-          run_logged() {
-            log="$1"; shift
-            "$@" > "$log" 2>&1 &
-            pid=$!
-            while kill -0 "$pid" 2>/dev/null; do
-              sleep 120
-              printf '%s | ' "$(date +%H:%M:%S)"
-              tail -n 1 "$log" | cut -c1-170
-            done
-            set +e
-            wait "$pid"
-            rc=$?
-            set -e
-            if [ "$rc" -ne 0 ]; then
-              echo "::error::Command failed with exit code $rc: $*"
-              show_log "$log"
-              return "$rc"
-            fi
-            return 0
-          }
-          EOF
-          echo "helper written"
+          sudo apt-get install -y \
+            ninja-build \
+            cmake \
+            python3 \
+            git \
+            build-essential \
+            binutils \
+            file
 
-      - name: Clone llvm-project at llvmorg-${{ env.LLVM_VERSION }}
+      - name: Download LLVM ${LLVM_VERSION}
+        shell: bash
         run: |
-          set -eu
-          source "$WORK/ci.sh"
-          git clone --depth 1 --branch "llvmorg-$LLVM_VERSION" \
-            https://github.com/llvm/llvm-project.git "$SRC"
-          cd "$SRC"
-          echo "HEAD: $(git rev-parse HEAD)"
-          git describe --tags --exact-match
-          test -f llvm/CMakeLists.txt
-          test -f clang/CMakeLists.txt
-          test -f clang/include/clang/Basic/Version.h
-          echo "Source OK: clang/include/clang/Basic/Version.h exists in the source tree"
+          set -eux
 
-      - name: Build HOST TableGen tools (x86_64)
+          rm -rf llvm-project
+
+          git clone \
+            --depth 1 \
+            --branch "llvmorg-${LLVM_VERSION}" \
+            https://github.com/llvm/llvm-project.git
+
+          test -f llvm-project/llvm/CMakeLists.txt
+          test -f llvm-project/clang/CMakeLists.txt
+
+      # ------------------------------------------------------------
+      # HOST LLVM TOOLS
+      #
+      # These tools execute on the GitHub runner itself.
+      # The Android LLVM build uses them while generating target code.
+      # ------------------------------------------------------------
+
+      - name: Configure native host LLVM tools
+        shell: bash
         run: |
-          set -eu
-          source "$WORK/ci.sh"
-          cmake -S "$SRC/llvm" -B "$HOST_BUILD" -G Ninja \
+          set -eux
+
+          cmake \
+            -S llvm-project/llvm \
+            -B build/llvm-host \
+            -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DLLVM_ENABLE_PROJECTS=clang \
-            -DLLVM_TARGETS_TO_BUILD=X86 \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/llvm-host-install" \
+            -DLLVM_ENABLE_PROJECTS="clang" \
+            -DLLVM_TARGETS_TO_BUILD="X86" \
             -DLLVM_ENABLE_ASSERTIONS=OFF \
             -DLLVM_INCLUDE_TESTS=OFF \
             -DLLVM_INCLUDE_EXAMPLES=OFF \
             -DLLVM_INCLUDE_BENCHMARKS=OFF \
             -DLLVM_INCLUDE_DOCS=OFF \
-            -DCLANG_INCLUDE_TESTS=OFF \
-            -DCLANG_INCLUDE_DOCS=OFF \
+            -DLLVM_BUILD_TOOLS=ON \
+            -DLLVM_INCLUDE_TOOLS=ON \
+            -DCLANG_BUILD_TOOLS=OFF \
+            -DLLVM_ENABLE_TERMINFO=OFF \
             -DLLVM_ENABLE_ZLIB=OFF \
             -DLLVM_ENABLE_ZSTD=OFF \
             -DLLVM_ENABLE_LIBXML2=OFF \
-            -DLLVM_ENABLE_TERMINFO=OFF \
-            -DLLVM_ENABLE_WARNINGS=OFF \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            > "$LOGS/host-configure.log" 2>&1 \
-            || { show_log "$LOGS/host-configure.log"; exit 1; }
-          tail -n 5 "$LOGS/host-configure.log"
-          run_logged "$LOGS/host-build.log" \
-            ninja -C "$HOST_BUILD" -j"$(nproc)" llvm-tblgen llvm-min-tblgen clang-tblgen
-          for t in llvm-tblgen llvm-min-tblgen clang-tblgen; do
-            if [ ! -x "$HOST_BUILD/bin/$t" ]; then
-              echo "::error::Missing host tool $t"
-              ls -la "$HOST_BUILD/bin" || true
-              exit 1
-            fi
-          done
-          "$HOST_BUILD/bin/llvm-tblgen" --version | head -n 3
-          echo "HOST TABLEGEN OK:"
-          ls -la "$HOST_BUILD/bin"
-
-      - name: Configure ANDROID arm64 LLVM + Clang
-        run: |
-          set -eu
-          source "$WORK/ci.sh"
-          CMAKE_ARGS=(
-            -S "$SRC/llvm" -B "$ANDROID_BUILD" -G Ninja
-            -DCMAKE_BUILD_TYPE=Release
-            -DCMAKE_INSTALL_PREFIX="$INSTALL"
-            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
-            -DANDROID_ABI="$ABI_NAME"
-            -DANDROID_PLATFORM="android-$ANDROID_API"
-            -DANDROID_STL=c++_static
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-
-            # Projects / targets: Clang MUST be part of THIS (target) build
-            -DLLVM_ENABLE_PROJECTS=clang
-            -DLLVM_TARGETS_TO_BUILD=AArch64
-            -DLLVM_HOST_TRIPLE=aarch64-linux-android
-            -DLLVM_DEFAULT_TARGET_TRIPLE=aarch64-linux-android
-            -DLLVM_TARGET_ARCH=AArch64
-
-            # Host TableGen tools for the cross build
-            -DLLVM_NATIVE_TOOL_DIR="$HOST_BUILD/bin"
-            -DLLVM_TABLEGEN="$HOST_BUILD/bin/llvm-tblgen"
-            -DCLANG_TABLEGEN="$HOST_BUILD/bin/clang-tblgen"
-
-            # Install EVERYTHING downstream projects need (headers + cmake pkgs)
-            -DLLVM_INSTALL_TOOLCHAIN_ONLY=OFF
-            -DLLVM_BUILD_LLVM_DYLIB=OFF
+            -DLLVM_ENABLE_CURL=OFF \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DLLVM_BUILD_LLVM_DYLIB=OFF \
             -DLLVM_LINK_LLVM_DYLIB=OFF
-            -DBUILD_SHARED_LIBS=OFF
-            -DLLVM_ENABLE_PIC=ON
 
-            # Match what Cycles/OSL expect (OSL subclasses LLVM classes)
-            -DLLVM_ENABLE_RTTI=ON
-            -DLLVM_ENABLE_EH=ON
-            -DLLVM_ENABLE_ASSERTIONS=OFF
-
-            # Libraries only: skip executables that cannot run on the runner
-            -DLLVM_BUILD_TOOLS=OFF
-            -DCLANG_BUILD_TOOLS=OFF
-            -DCLANG_ENABLE_STATIC_ANALYZER=OFF
-            -DCLANG_ENABLE_ARCMT=OFF
-
-            -DLLVM_INCLUDE_TESTS=OFF
-            -DLLVM_INCLUDE_EXAMPLES=OFF
-            -DLLVM_INCLUDE_BENCHMARKS=OFF
-            -DLLVM_INCLUDE_DOCS=OFF
-            -DCLANG_INCLUDE_TESTS=OFF
-            -DCLANG_INCLUDE_DOCS=OFF
-            -DLLVM_ENABLE_BINDINGS=OFF
-            -DLLVM_ENABLE_PLUGINS=OFF
-            -DLLVM_ENABLE_WARNINGS=OFF
-            -DLLVM_PARALLEL_LINK_JOBS=2
-
-            # No optional system libs on Android
-            -DLLVM_ENABLE_ZLIB=OFF
-            -DLLVM_ENABLE_ZSTD=OFF
-            -DLLVM_ENABLE_LIBXML2=OFF
-            -DLLVM_ENABLE_TERMINFO=OFF
-            -DLLVM_ENABLE_LIBEDIT=OFF
-            -DLLVM_ENABLE_LIBPFM=OFF
-            -DLLVM_ENABLE_FFI=OFF
-            -DLLVM_ENABLE_Z3_SOLVER=OFF
-          )
-          printf '%s\n' "${CMAKE_ARGS[@]}" > "$LOGS/android-cmake-args.txt"
-          cmake "${CMAKE_ARGS[@]}" > "$LOGS/android-configure.log" 2>&1 || {
-            show_log "$LOGS/android-configure.log"
-            for f in "$ANDROID_BUILD/CMakeFiles/CMakeError.log" "$ANDROID_BUILD/CMakeFiles/CMakeOutput.log"; do
-              [ -f "$f" ] && { echo "::group::tail $f"; tail -n 80 "$f"; echo "::endgroup::"; }
-            done
-            exit 1
-          }
-          tail -n 8 "$LOGS/android-configure.log"
-
-          echo "=========== Configure summary ==========="
-          grep -E '^(CMAKE_CXX_COMPILER|CMAKE_BUILD_TYPE|LLVM_ENABLE_PROJECTS|LLVM_TARGETS_TO_BUILD|LLVM_INSTALL_TOOLCHAIN_ONLY|LLVM_NATIVE_TOOL_DIR|LLVM_TABLEGEN|CLANG_TABLEGEN|LLVM_HOST_TRIPLE|LLVM_DEFAULT_TARGET_TRIPLE|LLVM_ENABLE_RTTI|ANDROID_ABI|ANDROID_PLATFORM)[:=]' \
-            "$ANDROID_BUILD/CMakeCache.txt" || true
-          echo "========================================="
-
-          # ---- Preflight: prove Clang is really part of the TARGET build ----
-          cd "$ANDROID_BUILD"
-          ninja -t targets all > "$LOGS/ninja-targets.txt"
-          for t in lib/libclangBasic.a lib/libclangFrontend.a lib/libclangCodeGen.a \
-                   lib/libLLVMSupport.a lib/libLLVMAArch64CodeGen.a; do
-            if ! grep -q "^$t:" "$LOGS/ninja-targets.txt"; then
-              echo "::error::Target $t is NOT in the Android build graph (Clang/LLVM not configured as expected)"
-              grep -E '^lib/libclang' "$LOGS/ninja-targets.txt" | head -n 20 || true
-              exit 1
-            fi
-          done
-          if ! grep -qF "$HOST_BUILD/bin/clang-tblgen" build.ninja; then
-            echo "::error::build.ninja does not reference the host clang-tblgen"
-            exit 1
-          fi
-          if ! grep -qF "$HOST_BUILD/bin/llvm-tblgen" build.ninja; then
-            echo "::error::build.ninja does not reference the host llvm-tblgen"
-            exit 1
-          fi
-          CXXC="$(grep '^CMAKE_CXX_COMPILER:' CMakeCache.txt | cut -d= -f2)"
-          case "$CXXC" in
-            *android-ndk*|*/ndk/*|"$ANDROID_NDK_HOME"/*) echo "Compiler is the NDK clang: $CXXC" ;;
-            *) echo "::error::Compiler is not from the NDK: $CXXC"; exit 1 ;;
-          esac
-          echo "PREFLIGHT OK: Clang libs are in the target graph and host TableGen tools are used"
-
-      - name: Build LLVM + Clang for Android (long)
+      - name: Build native host TableGen tools
+        shell: bash
         run: |
-          set -eu
-          source "$WORK/ci.sh"
-          run_logged "$LOGS/android-build.log" \
-            ninja -C "$ANDROID_BUILD" -j"$(nproc)"
-          tail -n 3 "$LOGS/android-build.log"
-          ccache -s | head -n 12 || true
+          set -eux
 
-      - name: Install
+          cmake --build build/llvm-host \
+            --target llvm-tblgen clang-tblgen \
+            --parallel "$(nproc)"
+
+          test -x build/llvm-host/bin/llvm-tblgen
+          test -x build/llvm-host/bin/clang-tblgen
+
+          file build/llvm-host/bin/llvm-tblgen
+          file build/llvm-host/bin/clang-tblgen
+
+      # ------------------------------------------------------------
+      # ANDROID LLVM / CLANG
+      # ------------------------------------------------------------
+
+      - name: Configure LLVM/Clang for Android ARM64
+        shell: bash
         run: |
-          set -eu
-          source "$WORK/ci.sh"
-          run_logged "$LOGS/android-install.log" \
-            ninja -C "$ANDROID_BUILD" install
-          tail -n 3 "$LOGS/android-install.log"
-          du -sh "$INSTALL"
+          set -eux
 
-      - name: Verify installation layout, headers, CMake packages, libraries
-        run: |
-          set -u
-          source "$WORK/ci.sh"
-          MISSING=0
-          req() {
-            if [ -e "$INSTALL/$1" ]; then echo "OK      $1"
-            else echo "MISSING $1"; MISSING=$((MISSING+1)); fi
-          }
+          NDK="$ANDROID_NDK_ROOT"
+          INSTALL="$GITHUB_WORKSPACE/llvm-android-install"
+          HOST_TOOLS="$GITHUB_WORKSPACE/build/llvm-host/bin"
 
-          echo "=== Install layout (depth 2) ==="
-          find "$INSTALL" -maxdepth 2 -mindepth 1 -type d | sort
-          echo "static libs: $(ls "$INSTALL"/lib/*.a 2>/dev/null | wc -l)"
-          echo
+          rm -rf build/llvm-android
+          rm -rf "$INSTALL"
 
-          echo "=== LLVM headers ==="
-          for f in include/llvm/IR/Module.h include/llvm/IR/LLVMContext.h \
-                   include/llvm/Support/Error.h include/llvm/ADT/StringRef.h \
-                   include/llvm/Config/llvm-config.h include/llvm/Config/abi-breaking.h \
-                   include/llvm/ExecutionEngine/Orc/LLJIT.h \
-                   include/llvm/Target/TargetMachine.h; do req "$f"; done
-
-          echo "=== Clang headers (source + generated) ==="
-          for f in include/clang/Basic/Version.h include/clang/Basic/Version.inc \
-                   include/clang/Config/config.h \
-                   include/clang/Basic/DiagnosticCommonKinds.inc \
-                   include/clang/Frontend/CompilerInstance.h \
-                   include/clang/CodeGen/CodeGenAction.h \
-                   include/clang/Driver/Driver.h include/clang-c/Index.h; do req "$f"; done
-
-          echo "=== Clang resource headers (builtin) ==="
-          RES="$(find "$INSTALL/lib/clang" -maxdepth 3 -type d -name include 2>/dev/null | head -n 1)"
-          if [ -n "$RES" ] && [ -f "$RES/stddef.h" ]; then echo "OK      $RES/stddef.h"
-          else echo "MISSING clang resource headers under lib/clang/*/include"; MISSING=$((MISSING+1)); fi
-
-          echo "=== CMake package files ==="
-          for f in lib/cmake/llvm/LLVMConfig.cmake lib/cmake/llvm/LLVMExports.cmake \
-                   lib/cmake/llvm/AddLLVM.cmake lib/cmake/clang/ClangConfig.cmake \
-                   lib/cmake/clang/ClangTargets.cmake; do req "$f"; done
-
-          echo "=== Required static libraries ==="
-          for l in LLVMSupport LLVMCore LLVMAnalysis LLVMBitReader LLVMBitWriter LLVMLinker \
-                   LLVMIRReader LLVMPasses LLVMExecutionEngine LLVMMCJIT LLVMOrcJIT \
-                   LLVMTarget LLVMTargetParser LLVMAArch64CodeGen LLVMAArch64Desc \
-                   LLVMAArch64Info LLVMAArch64AsmParser LLVMipo LLVMScalarOpts \
-                   clangBasic clangAST clangLex clangParse clangSema clangFrontend \
-                   clangDriver clangCodeGen clangSerialization clangEdit clangAnalysis \
-                   clangSupport; do req "lib/lib$l.a"; done
-
-          echo "=== Version strings ==="
-          if grep -F '"20.1.8"' "$INSTALL/include/llvm/Config/llvm-config.h" | grep -q LLVM_VERSION_STRING; then
-            echo "OK      llvm-config.h says 20.1.8"
-          else
-            echo "MISSING LLVM_VERSION_STRING 20.1.8"; grep LLVM_VERSION_STRING "$INSTALL/include/llvm/Config/llvm-config.h" || true
-            MISSING=$((MISSING+1))
-          fi
-
-          if [ "$MISSING" -ne 0 ]; then
-            echo "::error::$MISSING required install items are missing. What actually exists:"
-            echo "--- find Version.* ---";      find "$INSTALL" -name 'Version.*' | head -n 20
-            echo "--- include/ top level ---";  ls -la "$INSTALL/include" || true
-            echo "--- include/clang (depth 1) ---"; ls "$INSTALL/include/clang" 2>/dev/null | head -n 50 || true
-            echo "--- lib/cmake ---";           find "$INSTALL/lib/cmake" -maxdepth 2 | sort || true
-            echo "--- libclang*.a ---";         ls "$INSTALL"/lib/libclang*.a 2>/dev/null | head -n 50 || true
-            echo "--- install log tail ---";    tail -n 60 "$LOGS/android-install.log" || true
-            exit 1
-          fi
-          echo "LAYOUT VERIFIED"
-
-          echo
-          echo "=== AArch64 ELF check of EVERY static archive (extract object, readelf -h) ==="
-          AR="$TOOLCHAIN_BIN/llvm-ar"
-          READELF="$TOOLCHAIN_BIN/llvm-readelf"
-          TMP="$(mktemp -d)"
-          n=0; bad=0; skipped=0
-          for a in "$INSTALL"/lib/*.a; do
-            m="$("$AR" t "$a" 2>/dev/null | head -n 1 || true)"
-            if [ -z "$m" ]; then
-              echo "skip (empty archive): $(basename "$a")"; skipped=$((skipped+1)); continue
-            fi
-            "$AR" p "$a" "$m" > "$TMP/obj.o" 2>/dev/null || true
-            if ! "$READELF" -h "$TMP/obj.o" > "$TMP/hdr.txt" 2>&1; then
-              echo "BAD  $(basename "$a"): member '$m' is not readable ELF"; sed -n '1,5p' "$TMP/hdr.txt"
-              bad=$((bad+1)); continue
-            fi
-            if grep -Eq 'Class:[[:space:]]+ELF64' "$TMP/hdr.txt" && grep -Eq 'Machine:[[:space:]]+AArch64' "$TMP/hdr.txt"; then
-              n=$((n+1))
-            else
-              echo "BAD  $(basename "$a"): not ELF64/AArch64"; grep -E 'Class|Machine' "$TMP/hdr.txt"
-              bad=$((bad+1))
-            fi
-          done
-          echo "archives verified ELF64/AArch64: $n   skipped: $skipped   bad: $bad"
-          if [ "$bad" -ne 0 ] || [ "$n" -lt 100 ]; then
-            echo "::error::Archive architecture verification failed (bad=$bad, ok=$n)"
-            exit 1
-          fi
-          echo "ARCHIVES VERIFIED: all $n inspected archives contain ELF64 AArch64 objects"
-
-      - name: Smoke test - NDK consumer project using find_package(LLVM) + find_package(Clang)
-        run: |
-          set -eu
-          source "$WORK/ci.sh"
-          SMOKE="$WORK/smoke"
-          rm -rf "$SMOKE"; mkdir -p "$SMOKE"
-          cat > "$SMOKE/main.cpp" <<'EOF'
-          #include "llvm/IR/LLVMContext.h"
-          #include "llvm/IR/Module.h"
-          #include "llvm/Support/raw_ostream.h"
-          #include "clang/Basic/Version.h"
-          int main() {
-            llvm::LLVMContext ctx;
-            llvm::Module mod("smoke", ctx);
-            llvm::outs() << "module=" << mod.getName() << " clang=" << clang::getClangFullVersion() << "\n";
-            return 0;
-          }
-          EOF
-          cat > "$SMOKE/CMakeLists.txt" <<'EOF'
-          cmake_minimum_required(VERSION 3.20)
-          project(smoke CXX)
-          find_package(LLVM 20.1 REQUIRED CONFIG)
-          find_package(Clang REQUIRED CONFIG)
-          message(STATUS "SMOKE_LLVM_VERSION=${LLVM_PACKAGE_VERSION}")
-          message(STATUS "SMOKE_LLVM_INCLUDE_DIRS=${LLVM_INCLUDE_DIRS}")
-          message(STATUS "SMOKE_CLANG_INCLUDE_DIRS=${CLANG_INCLUDE_DIRS}")
-          separate_arguments(LLVM_DEFS NATIVE_COMMAND "${LLVM_DEFINITIONS}")
-          add_executable(smoke main.cpp)
-          target_include_directories(smoke PRIVATE ${LLVM_INCLUDE_DIRS} ${CLANG_INCLUDE_DIRS})
-          target_compile_definitions(smoke PRIVATE ${LLVM_DEFS})
-          target_compile_features(smoke PRIVATE cxx_std_17)
-          target_link_libraries(smoke PRIVATE clangBasic LLVMCore LLVMSupport)
-          EOF
-          cmake -S "$SMOKE" -B "$SMOKE/build" -G Ninja \
+          cmake \
+            -S llvm-project/llvm \
+            -B build/llvm-android \
+            -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
-            -DANDROID_ABI="$ABI_NAME" \
-            -DANDROID_PLATFORM="android-$ANDROID_API" \
-            -DANDROID_STL=c++_static \
-            -DCMAKE_FIND_ROOT_PATH="$INSTALL" \
-            -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH \
-            -DLLVM_DIR="$INSTALL/lib/cmake/llvm" \
-            -DClang_DIR="$INSTALL/lib/cmake/clang" \
-            > "$LOGS/smoke-configure.log" 2>&1 \
-            || { show_log "$LOGS/smoke-configure.log"; exit 1; }
-          grep SMOKE_ "$LOGS/smoke-configure.log"
-          grep -q 'SMOKE_LLVM_VERSION=20.1.8' "$LOGS/smoke-configure.log" \
-            || { echo "::error::find_package(LLVM) did not report 20.1.8"; exit 1; }
-          cmake --build "$SMOKE/build" > "$LOGS/smoke-build.log" 2>&1 \
-            || { show_log "$LOGS/smoke-build.log"; exit 1; }
-          BIN="$SMOKE/build/smoke"
-          test -f "$BIN"
-          "$TOOLCHAIN_BIN/llvm-readelf" -h "$BIN" | grep -E 'Class|Machine|Type'
-          "$TOOLCHAIN_BIN/llvm-readelf" -h "$BIN" | grep -Eq 'Class:[[:space:]]+ELF64'
-          "$TOOLCHAIN_BIN/llvm-readelf" -h "$BIN" | grep -Eq 'Machine:[[:space:]]+AArch64'
-          echo "--- dynamic NEEDED entries (expect only bionic libs) ---"
-          "$TOOLCHAIN_BIN/llvm-readelf" -d "$BIN" | grep NEEDED || true
-          echo "SMOKE TEST OK: NDK arm64 binary linked against installed LLVM+Clang static libs via CMake packages"
+            -DCMAKE_INSTALL_PREFIX="$INSTALL" \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI="$ANDROID_ABI" \
+            -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DCMAKE_SYSTEM_NAME=Android \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+            -DLLVM_NATIVE_TOOL_DIR="$HOST_TOOLS" \
+            -DLLVM_ENABLE_PROJECTS="clang" \
+            -DLLVM_TARGETS_TO_BUILD="AArch64" \
+            -DLLVM_DEFAULT_TARGET_TRIPLE="$TARGET_TRIPLE" \
+            -DLLVM_HOST_TRIPLE="$TARGET_TRIPLE" \
+            -DLLVM_ENABLE_ASSERTIONS=OFF \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_INCLUDE_DOCS=OFF \
+            -DLLVM_INCLUDE_TOOLS=ON \
+            -DLLVM_BUILD_TOOLS=ON \
+            -DCLANG_BUILD_TOOLS=OFF \
+            -DLLVM_ENABLE_TERMINFO=OFF \
+            -DLLVM_ENABLE_ZLIB=OFF \
+            -DLLVM_ENABLE_ZSTD=OFF \
+            -DLLVM_ENABLE_LIBXML2=OFF \
+            -DLLVM_ENABLE_CURL=OFF \
+            -DLLVM_INSTALL_TOOLCHAIN_ONLY=OFF \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DLLVM_BUILD_LLVM_DYLIB=OFF \
+            -DLLVM_LINK_LLVM_DYLIB=OFF \
+            -DLLVM_ENABLE_BINDINGS=OFF
 
-      - name: Package bundle and host tools
+      - name: Build LLVM/Clang for Android ARM64
+        shell: bash
         run: |
-          set -eu
-          source "$WORK/ci.sh"
-          cp "$ANDROID_BUILD/CMakeCache.txt" "$LOGS/android-CMakeCache.txt"
-          {
-            echo "LLVM_VERSION=$LLVM_VERSION"
-            echo "NDK_VERSION=$NDK_VERSION"
-            echo "ANDROID_API=$ANDROID_API"
-            echo "ABI=$ABI_NAME"
-            echo "LLVM_DIR=<bundle>/lib/cmake/llvm"
-            echo "Clang_DIR=<bundle>/lib/cmake/clang"
-            echo "source_commit=$(git -C "$SRC" rev-parse HEAD)"
-          } > "$INSTALL/BUNDLE_INFO.txt"
-          mkdir -p "$WORK/out" "$WORK/host-tools"
-          tar -C "$WORK" -cf - llvm-android-install | zstd -T0 -3 -o "$WORK/out/llvm-android-arm64-$LLVM_VERSION.tar.zst"
-          cp "$HOST_BUILD"/bin/llvm-tblgen "$HOST_BUILD"/bin/llvm-min-tblgen "$HOST_BUILD"/bin/clang-tblgen "$WORK/host-tools/"
-          ls -la "$WORK/out" "$WORK/host-tools"
-          {
-            echo "## Android LLVM/Clang $LLVM_VERSION bootstrap"
-            echo "- Bundle: llvm-android-arm64-$LLVM_VERSION.tar.zst ($(du -h "$WORK/out/llvm-android-arm64-$LLVM_VERSION.tar.zst" | cut -f1))"
-            echo "- Static libs installed: $(ls "$INSTALL"/lib/*.a | wc -l)"
-            echo "- Verified: headers, CMake packages, AArch64 ELF in all archives, NDK consumer link"
-          } >> "$GITHUB_STEP_SUMMARY"
+          set -eux
+
+          cmake --build build/llvm-android \
+            --parallel "$(nproc)"
+
+      - name: Install LLVM/Clang for Android ARM64
+        shell: bash
+        run: |
+          set -eux
+
+          cmake --build build/llvm-android --target install
+
+      # ------------------------------------------------------------
+      # VERIFICATION
+      # ------------------------------------------------------------
+
+      - name: Verify LLVM / Clang installation
+        shell: bash
+        run: |
+          set -eux
+
+          INSTALL="$GITHUB_WORKSPACE/llvm-android-install"
+
           echo "=========================================="
-          echo " LLVM_ANDROID_STAGE_SUCCESS"
+          echo " Verifying LLVM / Clang Installation"
           echo "=========================================="
+
+          echo ""
+          echo "LLVM headers:"
+          test -f "$INSTALL/include/llvm/IR/Module.h"
+          test -f "$INSTALL/include/llvm/Support/Error.h"
+          test -f "$INSTALL/include/llvm/ADT/StringRef.h"
+
+          echo "Clang headers:"
+          test -f "$INSTALL/include/clang/Basic/Version.h"
+          test -f "$INSTALL/include/clang/AST/ASTContext.h"
+          test -f "$INSTALL/include/clang/Frontend/CompilerInstance.h"
+
+          echo ""
+          echo "CMake package files:"
+          test -f "$INSTALL/lib/cmake/llvm/LLVMConfig.cmake"
+          test -f "$INSTALL/lib/cmake/clang/ClangConfig.cmake"
+
+          echo ""
+          echo "LLVM libraries:"
+          find "$INSTALL/lib" -maxdepth 1 -type f -name 'libLLVM*.a' -print | head -20
+
+          LLVM_ARCHIVE="$(find "$INSTALL/lib" -maxdepth 1 -type f -name 'libLLVM*.a' | head -n 1)"
+
+          test -n "$LLVM_ARCHIVE"
+          test -f "$LLVM_ARCHIVE"
+
+          echo ""
+          echo "Checking target architecture in:"
+          echo "$LLVM_ARCHIVE"
+
+          rm -rf verify-llvm
+          mkdir -p verify-llvm
+
+          FIRST_OBJECT="$(
+            ar t "$LLVM_ARCHIVE" | head -n 1
+          )"
+
+          test -n "$FIRST_OBJECT"
+
+          cd verify-llvm
+          ar x "$LLVM_ARCHIVE" "$FIRST_OBJECT"
+
+          echo ""
+          echo "Extracted object:"
+          ls -l
+
+          readelf -h "$FIRST_OBJECT" | tee elf-header.txt
+
+          grep -q "AArch64" elf-header.txt
+
+          cd ..
+
+          echo ""
+          echo "Host TableGen tools:"
+          test -x build/llvm-host/bin/llvm-tblgen
+          test -x build/llvm-host/bin/clang-tblgen
+
+          build/llvm-host/bin/llvm-tblgen --version
+          build/llvm-host/bin/clang-tblgen --version
+
+          echo ""
+          echo "LLVM installed successfully."
+          echo "Target: AArch64 Android"
+          echo "API: ${ANDROID_API}"
+          echo "LLVM: ${LLVM_VERSION}"
+
+      # ------------------------------------------------------------
+      # ANDROID COMPILER SMOKE TEST
+      # ------------------------------------------------------------
+
+      - name: Verify Android NDK compiler
+        shell: bash
+        run: |
+          set -eux
+
+          NDK="$ANDROID_NDK_ROOT"
+          CLANG="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/${TARGET_TRIPLE}-clang"
+
+          test -x "$CLANG"
+
+          echo "Using:"
+          echo "$CLANG"
+
+          "$CLANG" --version
+
+          cat > android-smoke.c <<'EOF'
+          int android_llvm_smoke_test(void)
+          {
+              return 42;
+          }
+          EOF
+
+          "$CLANG" \
+            -fPIC \
+            -c android-smoke.c \
+            -o android-smoke.o
+
+          file android-smoke.o
+
+          readelf -h android-smoke.o | grep AArch64
+
+          echo "Android ARM64 compiler smoke test passed."
+
+      # ------------------------------------------------------------
+      # PACKAGE
+      # ------------------------------------------------------------
+
+      - name: Package LLVM Android bundle
+        shell: bash
+        run: |
+          set -eux
+
+          tar \
+            -C "$GITHUB_WORKSPACE" \
+            -czf llvm-android-${LLVM_VERSION}-arm64-v8a.tar.gz \
+            llvm-android-install
 
       - name: Upload LLVM Android bundle
         uses: actions/upload-artifact@v4
         with:
-          name: llvm-android-arm64-${{ env.LLVM_VERSION }}
-          path: ${{ env.WORK }}/out/llvm-android-arm64-${{ env.LLVM_VERSION }}.tar.zst
-          compression-level: 0
+          name: llvm-android-${{ env.LLVM_VERSION }}-arm64-v8a
+          path: llvm-android-${{ env.LLVM_VERSION }}-arm64-v8a.tar.gz
           if-no-files-found: error
-
-      - name: Upload host TableGen tools
-        uses: actions/upload-artifact@v4
-        with:
-          name: llvm-host-tablegen-${{ env.LLVM_VERSION }}
-          path: ${{ env.WORK }}/host-tools/
-          if-no-files-found: error
-
-      - name: Failure diagnostics
-        if: failure()
-        run: |
-          source "$WORK/ci.sh" || true
-          echo "=== disk ==="; df -h / /mnt || true
-          echo "=== install tree (depth 3) ==="
-          find "$INSTALL" -maxdepth 3 -mindepth 1 2>/dev/null | sort | head -n 150 || true
-          for f in "$LOGS"/*.log; do
-            [ -f "$f" ] || continue
-            echo "=== $(basename "$f"): last 25 lines ==="
-            tail -n 25 "$f"
-          done
-
-      - name: Save ccache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ env.WORK }}/ccache
-          key: llvm-android-${{ env.LLVM_VERSION }}-${{ github.run_id }}
-
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: llvm-android-logs-${{ github.run_id }}
-          path: ${{ env.WORK }}/logs/
-          if-no-files-found: warn
+          retention-days: 7
