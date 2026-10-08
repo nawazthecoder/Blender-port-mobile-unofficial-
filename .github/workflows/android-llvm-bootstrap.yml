@@ -96,7 +96,6 @@ jobs:
             llvm-android/host-tools \
             llvm-android/host-llvm-install \
             llvm-android/host-clang-install \
-            llvm-android/target-llvm-install \
             llvm-android/target-install \
             llvm-android/package \
             llvm-android/logs
@@ -123,10 +122,6 @@ jobs:
 
           echo \
             "HOST_CLANG_INSTALL=$GITHUB_WORKSPACE/llvm-android/host-clang-install" \
-            >> "$GITHUB_ENV"
-
-          echo \
-            "TARGET_LLVM_INSTALL=$GITHUB_WORKSPACE/llvm-android/target-llvm-install" \
             >> "$GITHUB_ENV"
 
           echo \
@@ -158,7 +153,7 @@ jobs:
             >> "$GITHUB_ENV"
 
       # ============================================================
-      # SOURCE
+      # LLVM SOURCE
       # ============================================================
 
       - name: Download LLVM source
@@ -183,11 +178,6 @@ jobs:
       # ============================================================
       # STAGE 1
       # NATIVE HOST LLVM
-      #
-      # We deliberately do NOT enable Clang here.
-      #
-      # This is a clean standalone LLVM build that provides the
-      # native LLVM libraries and the native TableGen binaries.
       # ============================================================
 
       - name: Configure native host LLVM
@@ -203,16 +193,13 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$HOST_LLVM_INSTALL" \
             \
-            -DLLVM_ENABLE_PROJECTS="" \
             -DLLVM_TARGETS_TO_BUILD=X86 \
-            \
-            -DLLVM_INSTALL_UTILS=ON \
-            \
-            -DLLVM_BUILD_TOOLS=OFF \
-            -DLLVM_INCLUDE_TOOLS=OFF \
             \
             -DLLVM_BUILD_UTILS=ON \
             -DLLVM_INCLUDE_UTILS=ON \
+            \
+            -DLLVM_BUILD_TOOLS=OFF \
+            -DLLVM_INCLUDE_TOOLS=OFF \
             \
             -DLLVM_BUILD_TESTS=OFF \
             -DLLVM_INCLUDE_TESTS=OFF \
@@ -299,9 +286,6 @@ jobs:
       # ============================================================
       # STAGE 2
       # NATIVE STANDALONE CLANG
-      #
-      # IMPORTANT:
-      # This is a real standalone Clang project.
       # ============================================================
 
       - name: Configure native standalone Clang
@@ -311,6 +295,9 @@ jobs:
 
           rm -rf "$BUILD/host-clang"
 
+          test -f \
+            "$HOST_LLVM_INSTALL/lib/cmake/llvm/LLVMConfig.cmake"
+
           cmake \
             -S "$SRC/clang" \
             -B "$BUILD/host-clang" \
@@ -319,9 +306,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$HOST_CLANG_INSTALL" \
             \
-            -DLLVM_ROOT="$HOST_LLVM_INSTALL" \
             -DLLVM_DIR="$HOST_LLVM_INSTALL/lib/cmake/llvm" \
-            \
+            -DLLVM_TOOLS_BINARY_DIR="$HOST_TOOLS" \
             -DLLVM_TABLEGEN_EXE="$HOST_TOOLS/llvm-tblgen" \
             -DLLVM_NATIVE_TOOL_DIR="$HOST_TOOLS" \
             \
@@ -343,7 +329,7 @@ jobs:
             \
             2>&1 | tee "$LOGS/host-clang-configure.log"
 
-      - name: Verify native Clang targets
+      - name: Verify native Clang TableGen target
         shell: bash
         run: |
           set -euxo pipefail
@@ -356,7 +342,7 @@ jobs:
           grep -q '^clang-tblgen:' \
             "$ROOT/host-clang-targets.txt"
 
-          echo "clang-tblgen target exists."
+          echo "clang-tblgen target found."
 
       - name: Build native Clang TableGen
         shell: bash
@@ -390,11 +376,15 @@ jobs:
           file "$HOST_TOOLS/clang-tblgen"
           "$HOST_TOOLS/clang-tblgen" --version
 
+          echo
+          echo "========== Host architecture =========="
+
+          readelf -h "$HOST_TOOLS/clang-tblgen" |
+            grep -E "Class:|Machine:"
+
       # ============================================================
       # STAGE 3
-      # ANDROID STANDALONE LLVM
-      #
-      # No Clang project here.
+      # ANDROID ARM64 LLVM
       # ============================================================
 
       - name: Configure Android standalone LLVM
@@ -410,7 +400,7 @@ jobs:
             -G Ninja \
             \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$TARGET_LLVM_INSTALL" \
+            -DCMAKE_INSTALL_PREFIX="$TARGET_INSTALL" \
             \
             -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
@@ -436,11 +426,11 @@ jobs:
             \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             \
-            -DLLVM_ENABLE_PROJECTS="" \
             -DLLVM_TARGETS_TO_BUILD=AArch64 \
             \
             -DLLVM_HOST_TRIPLE="$HOST_TRIPLE" \
             -DLLVM_DEFAULT_TARGET_TRIPLE="$TARGET_TRIPLE" \
+            -DLLVM_TARGET_ARCH=AArch64 \
             \
             -DLLVM_NATIVE_TOOL_DIR="$HOST_TOOLS" \
             -DLLVM_TABLEGEN="$HOST_TOOLS/llvm-tblgen" \
@@ -493,7 +483,7 @@ jobs:
           test -f "$CACHE"
 
           echo
-          echo "========== Android LLVM target =========="
+          echo "========== Android target =========="
 
           grep -E \
             '^(CMAKE_SYSTEM_NAME|CMAKE_SYSTEM_PROCESSOR|CMAKE_C_COMPILER_TARGET|CMAKE_CXX_COMPILER_TARGET|CMAKE_SYSROOT):' \
@@ -503,11 +493,11 @@ jobs:
           echo "========== LLVM target =========="
 
           grep -E \
-            '^(LLVM_ENABLE_PROJECTS|LLVM_HOST_TRIPLE|LLVM_DEFAULT_TARGET_TRIPLE|LLVM_TARGETS_TO_BUILD|LLVM_NATIVE_TOOL_DIR|LLVM_TABLEGEN|LLVM_INSTALL_TOOLCHAIN_ONLY):' \
+            '^(LLVM_HOST_TRIPLE|LLVM_DEFAULT_TARGET_TRIPLE|LLVM_TARGET_ARCH|LLVM_TARGETS_TO_BUILD|LLVM_NATIVE_TOOL_DIR|LLVM_TABLEGEN|LLVM_INSTALL_TOOLCHAIN_ONLY):' \
             "$CACHE" || true
 
           echo
-          echo "========== Host TableGen =========="
+          echo "========== Native TableGen =========="
 
           test -x "$HOST_TOOLS/llvm-tblgen"
           test -x "$HOST_TOOLS/llvm-min-tblgen"
@@ -524,29 +514,7 @@ jobs:
             -j "$BUILD_JOBS" \
             2>&1 | tee "$LOGS/target-llvm-libraries-build.log"
 
-      - name: Install Android LLVM headers
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          cmake \
-            --build "$BUILD/target-llvm" \
-            --target install-llvm-headers \
-            -j "$BUILD_JOBS" \
-            2>&1 | tee "$LOGS/target-llvm-headers-install.log"
-
-      - name: Install Android LLVM libraries
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          cmake \
-            --build "$BUILD/target-llvm" \
-            --target install-llvm-libraries \
-            -j "$BUILD_JOBS" \
-            2>&1 | tee "$LOGS/target-llvm-libraries-install.log"
-
-      - name: Install remaining Android LLVM files
+      - name: Install Android LLVM
         shell: bash
         run: |
           set -euxo pipefail
@@ -558,8 +526,6 @@ jobs:
       # ============================================================
       # STAGE 4
       # ANDROID STANDALONE CLANG
-      #
-      # This is now completely separate from the LLVM parent build.
       # ============================================================
 
       - name: Configure Android standalone Clang
@@ -570,7 +536,7 @@ jobs:
           rm -rf "$BUILD/target-clang"
 
           test -f \
-            "$TARGET_LLVM_INSTALL/lib/cmake/llvm/LLVMConfig.cmake"
+            "$TARGET_INSTALL/lib/cmake/llvm/LLVMConfig.cmake"
 
           cmake \
             -S "$SRC/clang" \
@@ -580,20 +546,20 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$TARGET_INSTALL" \
             \
-            -DLLVM_ROOT="$TARGET_LLVM_INSTALL" \
-            -DLLVM_DIR="$TARGET_LLVM_INSTALL/lib/cmake/llvm" \
-            \
+            -DLLVM_DIR="$TARGET_INSTALL/lib/cmake/llvm" \
+            -DLLVM_TOOLS_BINARY_DIR="$HOST_TOOLS" \
             -DLLVM_TABLEGEN_EXE="$HOST_TOOLS/llvm-tblgen" \
-            -LLVM_NATIVE_TOOL_DIR="$HOST_TOOLS" \
+            -DLLVM_NATIVE_TOOL_DIR="$HOST_TOOLS" \
             \
             -DCLANG_TABLEGEN="$HOST_TOOLS/clang-tblgen" \
             \
             -DCLANG_BUILD_TOOLS=OFF \
             -DCLANG_INCLUDE_TESTS=OFF \
             \
-            -DLLVM_ENABLE_PROJECTS="" \
             -DLLVM_BUILD_TESTS=OFF \
             -DLLVM_INCLUDE_TESTS=OFF \
+            \
+            -DLLVM_INSTALL_TOOLCHAIN_ONLY=OFF \
             \
             -DLLVM_ENABLE_ZLIB=OFF \
             -DLLVM_ENABLE_ZSTD=OFF \
@@ -604,8 +570,6 @@ jobs:
             -DLLVM_ENABLE_FFI=OFF \
             \
             -DCLANG_ENABLE_LIBXML2=OFF \
-            \
-            -DLLVM_INSTALL_TOOLCHAIN_ONLY=OFF \
             \
             -DBUILD_SHARED_LIBS=OFF \
             \
@@ -629,12 +593,12 @@ jobs:
             \
             2>&1 | tee "$LOGS/target-clang-configure.log"
 
-      - name: Verify standalone Clang targets
+      - name: Verify standalone Android Clang targets
         shell: bash
         run: |
           set -euxo pipefail
 
-          echo "========== Target Clang targets =========="
+          echo "========== Android Clang targets =========="
 
           ninja \
             -C "$BUILD/target-clang" \
@@ -662,10 +626,6 @@ jobs:
           echo "install-clang-headers: OK"
           echo "install-clang-libraries: OK"
 
-      # ============================================================
-      # BUILD AND INSTALL STANDALONE CLANG
-      # ============================================================
-
       - name: Build Android Clang libraries
         shell: bash
         run: |
@@ -677,7 +637,7 @@ jobs:
             -j "$BUILD_JOBS" \
             2>&1 | tee "$LOGS/target-clang-libraries-build.log"
 
-      - name: Install Clang headers
+      - name: Install Android Clang headers
         shell: bash
         run: |
           set -euxo pipefail
@@ -688,7 +648,7 @@ jobs:
             -j "$BUILD_JOBS" \
             2>&1 | tee "$LOGS/target-clang-headers-install.log"
 
-      - name: Install Clang libraries
+      - name: Install Android Clang libraries
         shell: bash
         run: |
           set -euxo pipefail
@@ -699,7 +659,7 @@ jobs:
             -j "$BUILD_JOBS" \
             2>&1 | tee "$LOGS/target-clang-libraries-install.log"
 
-      - name: Install remaining standalone Clang files
+      - name: Install remaining Clang files
         shell: bash
         run: |
           set -euxo pipefail
@@ -709,17 +669,13 @@ jobs:
             2>&1 | tee "$LOGS/target-clang-final-install.log"
 
       # ============================================================
-      # VERIFY CLANG PUBLIC HEADERS
+      # VERIFY CLANG HEADERS
       # ============================================================
 
       - name: Verify Clang public headers
         shell: bash
         run: |
           set -euxo pipefail
-
-          echo "=========================================="
-          echo " Clang public headers"
-          echo "=========================================="
 
           test -d \
             "$TARGET_INSTALL/include/clang"
@@ -782,7 +738,8 @@ jobs:
 
           RESOURCE_DIR="$TARGET_INSTALL/lib/clang/20/include"
 
-          test -d "$RESOURCE_DIR"
+          test -d \
+            "$RESOURCE_DIR"
 
           test -f \
             "$RESOURCE_DIR/stddef.h"
@@ -793,7 +750,7 @@ jobs:
           echo "PASS: Clang resource headers installed."
 
       # ============================================================
-      # VERIFY CMAKE FILES
+      # VERIFY LLVM CMAKE CONFIG
       # ============================================================
 
       - name: Verify LLVM CMake package
@@ -813,6 +770,10 @@ jobs:
 
           echo "FOUND:"
           echo "$LLVM_CONFIG"
+
+      # ============================================================
+      # VERIFY CLANG CMAKE CONFIG
+      # ============================================================
 
       - name: Verify Clang CMake package
         shell: bash
@@ -868,7 +829,7 @@ jobs:
       # ARM64 VERIFICATION
       # ============================================================
 
-      - name: Verify Android ARM64 libraries
+      - name: Verify Android ARM64 LLVM and Clang libraries
         shell: bash
         run: |
           set -euxo pipefail
@@ -937,7 +898,7 @@ jobs:
           echo "=========================================="
 
       # ============================================================
-      # VERIFY ANDROID NDK COMPILER
+      # NDK COMPILER SMOKE TEST
       # ============================================================
 
       - name: Android ARM64 compiler smoke test
@@ -968,6 +929,9 @@ jobs:
             -o \
             "$TEST_DIR/test.o"
 
+          echo
+          echo "========== Compiler output =========="
+
           file "$TEST_DIR/test.o"
 
           readelf -h "$TEST_DIR/test.o" |
@@ -978,17 +942,13 @@ jobs:
           echo "Android ARM64 compiler smoke test PASSED."
 
       # ============================================================
-      # FINAL INSTALLATION
+      # FINAL TREE
       # ============================================================
 
       - name: Show final installation
         shell: bash
         run: |
           set -eux
-
-          echo "=========================================="
-          echo " FINAL ANDROID LLVM/CLANG INSTALL"
-          echo "=========================================="
 
           find "$TARGET_INSTALL" \
             -maxdepth 5 \
