@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       llvm_run_id:
-        description: Successful GitHub Actions run ID that produced llvm-20.1.8-android-arm64
+        description: GitHub Actions run ID that produced the Android LLVM artifact
         required: true
         default: '37872328646'
         type: string
       oiio_run_id:
-        description: Successful GitHub Actions run ID that produced android-arm64-oiio
+        description: GitHub Actions run ID that produced the Android OIIO artifact
         required: true
         default: '37616185108'
         type: string
@@ -23,10 +23,11 @@ jobs:
     name: Test Android TIFF and OpenImageIO package discovery
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+
     env:
       ANDROID_API: '29'
       ANDROID_NDK_VERSION: '27.3.13750724'
-      ROOT: tiff-oiio-diagnostic
+      ROOT: ${{ github.workspace }}/tiff-oiio-diagnostic
 
     steps:
       - name: Check out repository
@@ -41,14 +42,16 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           sdkmanager \
             --sdk_root="$ANDROID_SDK_ROOT" \
             "platform-tools" \
             "platforms;android-${ANDROID_API}" \
             "ndk;${ANDROID_NDK_VERSION}"
+
           echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
 
-      - name: Download LLVM Android ARM64 artifact
+      - name: Download Android LLVM artifact
         uses: actions/download-artifact@v4
         with:
           repository: ${{ github.repository }}
@@ -57,7 +60,7 @@ jobs:
           name: llvm-20.1.8-android-arm64
           path: ${{ github.workspace }}/tiff-oiio-diagnostic/artifacts/llvm
 
-      - name: Download OpenImageIO Android ARM64 artifact
+      - name: Download Android OpenImageIO artifact
         uses: actions/download-artifact@v4
         with:
           repository: ${{ github.repository }}
@@ -70,24 +73,33 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          mkdir -p "$ROOT/deps/llvm" "$ROOT/deps/oiio" "$ROOT/logs" \
-                   "$ROOT/probe-tiff" "$ROOT/probe-oiio" "$ROOT/build-tiff" "$ROOT/build-oiio"
+
+          mkdir -p \
+            "$ROOT/deps/llvm" \
+            "$ROOT/deps/oiio" \
+            "$ROOT/logs" \
+            "$ROOT/probe-tiff" \
+            "$ROOT/probe-oiio" \
+            "$ROOT/build-tiff" \
+            "$ROOT/build-oiio"
 
           LLVM_ARCHIVE="$(find "$ROOT/artifacts/llvm" -type f -name '*.tar.gz' -print -quit)"
           OIIO_ARCHIVE="$(find "$ROOT/artifacts/oiio" -type f -name '*.tar.gz' -print -quit)"
+
           test -n "$LLVM_ARCHIVE"
           test -n "$OIIO_ARCHIVE"
 
-          echo "LLVM archive: $LLVM_ARCHIVE" | tee "$ROOT/logs/package-inventory.txt"
-          echo "OIIO archive: $OIIO_ARCHIVE" | tee -a "$ROOT/logs/package-inventory.txt"
-          echo >> "$ROOT/logs/package-inventory.txt"
-          echo "=== First entries in LLVM archive ===" >> "$ROOT/logs/package-inventory.txt"
-          tar -tzf "$LLVM_ARCHIVE" | sed -n '1,30p' >> "$ROOT/logs/package-inventory.txt"
-          echo >> "$ROOT/logs/package-inventory.txt"
-          echo "=== First entries in OIIO archive ===" >> "$ROOT/logs/package-inventory.txt"
-          tar -tzf "$OIIO_ARCHIVE" | sed -n '1,60p' >> "$ROOT/logs/package-inventory.txt"
+          {
+            echo "LLVM archive: $LLVM_ARCHIVE"
+            echo "OIIO archive: $OIIO_ARCHIVE"
+            echo
+            echo "=== LLVM archive entries ==="
+            tar -tzf "$LLVM_ARCHIVE" | sed -n '1,30p'
+            echo
+            echo "=== OIIO archive entries ==="
+            tar -tzf "$OIIO_ARCHIVE" | sed -n '1,60p'
+          } | tee "$ROOT/logs/package-inventory.txt"
 
-          # Extract both dependency bundles.
           tar -xzf "$LLVM_ARCHIVE" -C "$ROOT/deps/llvm"
           tar -xzf "$OIIO_ARCHIVE" -C "$ROOT/deps/oiio"
 
@@ -95,17 +107,19 @@ jobs:
           OIIO_CONFIG="$(find "$ROOT/deps/oiio" -type f -name OpenImageIOConfig.cmake -print -quit)"
           TIFF_LIB="$(find "$ROOT/deps/oiio" -type f -name libtiff.a -print -quit)"
           TIFF_HEADER="$(find "$ROOT/deps/oiio" -type f -name tiffio.h -print -quit)"
+
           test -n "$LLVM_CONFIG"
           test -n "$OIIO_CONFIG"
           test -n "$TIFF_LIB"
           test -n "$TIFF_HEADER"
 
-          # Derive prefixes from the actual discovered configuration paths.
           LLVM_PREFIX="${LLVM_CONFIG%/lib/cmake/llvm/LLVMConfig.cmake}"
           OIIO_PREFIX="${OIIO_CONFIG%/lib/cmake/OpenImageIO/OpenImageIOConfig.cmake}"
           TIFF_INCLUDE_DIR="$(dirname "$TIFF_HEADER")"
 
           {
+            echo
+            echo "=== Resolved paths ==="
             echo "LLVM_CONFIG=$LLVM_CONFIG"
             echo "LLVM_PREFIX=$LLVM_PREFIX"
             echo "OpenImageIO_CONFIG=$OIIO_CONFIG"
@@ -113,9 +127,10 @@ jobs:
             echo "TIFF_LIBRARY=$TIFF_LIB"
             echo "TIFF_INCLUDE_DIR=$TIFF_INCLUDE_DIR"
             echo
-            echo "=== Discovered package configuration files ==="
+            echo "=== Package configuration files ==="
             find "$ROOT/deps/oiio" -type f \
-              \( -name '*Config.cmake' -o -name '*-config.cmake' \) -print | sort
+              \( -name '*Config.cmake' -o -name '*-config.cmake' \) \
+              -print | sort
           } | tee -a "$ROOT/logs/package-inventory.txt"
 
           {
@@ -123,16 +138,18 @@ jobs:
             echo "OIIO_PREFIX=$OIIO_PREFIX"
             echo "TIFF_LIB=$TIFF_LIB"
             echo "TIFF_INCLUDE_DIR=$TIFF_INCLUDE_DIR"
-            echo "TOOLCHAIN=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake"
           } >> "$GITHUB_ENV"
 
           cat > "$ROOT/probe-tiff/CMakeLists.txt" <<'CMAKE'
           cmake_minimum_required(VERSION 3.20)
           project(TiffPackageProbe LANGUAGES C CXX)
+
           find_package(TIFF MODULE REQUIRED)
+
           message(STATUS "TIFF_FOUND=${TIFF_FOUND}")
           message(STATUS "TIFF_LIBRARIES=${TIFF_LIBRARIES}")
           message(STATUS "TIFF_INCLUDE_DIRS=${TIFF_INCLUDE_DIRS}")
+
           if(TARGET TIFF::TIFF)
             get_target_property(_tiff_location TIFF::TIFF IMPORTED_LOCATION_RELEASE)
             if(NOT _tiff_location)
@@ -145,9 +162,12 @@ jobs:
           cat > "$ROOT/probe-oiio/CMakeLists.txt" <<'CMAKE'
           cmake_minimum_required(VERSION 3.20)
           project(OpenImageIOPackageProbe LANGUAGES C CXX)
+
           find_package(OpenImageIO CONFIG REQUIRED)
+
           message(STATUS "OpenImageIO_FOUND=${OpenImageIO_FOUND}")
           message(STATUS "OpenImageIO_VERSION=${OpenImageIO_VERSION}")
+
           if(TARGET OpenImageIO::OpenImageIO)
             message(STATUS "OpenImageIO::OpenImageIO target exists")
           elseif(TARGET OpenImageIO)
@@ -160,12 +180,18 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          TOOLCHAIN="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake"
-          : > "$ROOT/logs/probe-status.txt"
 
-          echo '===== TIFF probe ====='
+          TOOLCHAIN="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake"
+          TIFF_RC=1
+          OIIO_RC=1
+
+          echo "===== TIFF probe ====="
+
           set +e
-          cmake -S "$ROOT/probe-tiff" -B "$ROOT/build-tiff" -G Ninja \
+          cmake \
+            -S "$ROOT/probe-tiff" \
+            -B "$ROOT/build-tiff" \
+            -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM="android-${ANDROID_API}" \
@@ -175,13 +201,20 @@ jobs:
             -DTIFF_LIBRARY="$TIFF_LIB" \
             -DTIFF_LIBRARY_RELEASE="$TIFF_LIB" \
             -DTIFF_INCLUDE_DIR="$TIFF_INCLUDE_DIR" \
-            -DCMAKE_PREFIX_PATH="$OIIO_PREFIX" \
+            "-DCMAKE_PREFIX_PATH=$OIIO_PREFIX" \
             2>&1 | tee "$ROOT/logs/tiff-probe.log"
-          TIFF_RC=${PIPESTATUS[0]}
-          echo "TIFF_PROBE_EXIT_CODE=$TIFF_RC" | tee -a "$ROOT/logs/probe-status.txt"
 
-          echo '===== OpenImageIO probe ====='
-          cmake -S "$ROOT/probe-oiio" -B "$ROOT/build-oiio" -G Ninja \
+          TIFF_RC=${PIPESTATUS[0]}
+
+          echo "TIFF_PROBE_EXIT_CODE=$TIFF_RC" \
+            | tee -a "$ROOT/logs/probe-status.txt"
+
+          echo "===== OpenImageIO probe ====="
+
+          cmake \
+            -S "$ROOT/probe-oiio" \
+            -B "$ROOT/build-oiio" \
+            -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM="android-${ANDROID_API}" \
@@ -199,10 +232,13 @@ jobs:
             -DTIFF_LIBRARY_RELEASE="$TIFF_LIB" \
             -DTIFF_INCLUDE_DIR="$TIFF_INCLUDE_DIR" \
             2>&1 | tee "$ROOT/logs/oiio-probe.log"
+
           OIIO_RC=${PIPESTATUS[0]}
           set -e
 
-          echo "OIIO_PROBE_EXIT_CODE=$OIIO_RC" | tee -a "$ROOT/logs/probe-status.txt"
+          echo "OIIO_PROBE_EXIT_CODE=$OIIO_RC" \
+            | tee -a "$ROOT/logs/probe-status.txt"
+
           echo "tiff_rc=$TIFF_RC" >> "$GITHUB_OUTPUT"
           echo "oiio_rc=$OIIO_RC" >> "$GITHUB_OUTPUT"
 
@@ -223,10 +259,13 @@ jobs:
           OIIO_RC: ${{ steps.probes.outputs.oiio_rc }}
         run: |
           set -u
+
           if [[ "$TIFF_RC" != "0" || "$OIIO_RC" != "0" ]]; then
-            echo "At least one package-discovery probe failed. Download android-tiff-oiio-diagnostic-report."
+            echo "At least one package-discovery probe failed."
+            echo "Download android-tiff-oiio-diagnostic-report."
             echo "TIFF_PROBE_EXIT_CODE=$TIFF_RC"
             echo "OIIO_PROBE_EXIT_CODE=$OIIO_RC"
             exit 1
           fi
+
           echo "Both TIFF and OpenImageIO package-discovery probes passed."
