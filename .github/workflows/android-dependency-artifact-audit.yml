@@ -1,0 +1,245 @@
+name: Android dependency artifact audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      llvm_run_id:
+        description: "Successful LLVM/Clang workflow run ID"
+        required: true
+        type: string
+        default: "37872328646"
+
+      oiio_run_id:
+        description: "Successful OIIO workflow run ID"
+        required: true
+        type: string
+        default: "37616185108"
+
+      python_run_id:
+        description: "Successful Android Python workflow run ID"
+        required: true
+        type: string
+        default: "37454200351"
+
+      osl_run_id:
+        description: "Successful host OSL workflow run ID"
+        required: true
+        type: string
+        default: "37496633775"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  audit:
+    name: Download and inspect existing artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check GitHub CLI
+        run: gh --version
+
+      - name: Download existing successful-run artifacts
+        id: fetch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          LLVM_RUN_ID: ${{ inputs.llvm_run_id }}
+          OIIO_RUN_ID: ${{ inputs.oiio_run_id }}
+          PYTHON_RUN_ID: ${{ inputs.python_run_id }}
+          OSL_RUN_ID: ${{ inputs.osl_run_id }}
+        run: |
+          set -uo pipefail
+
+          mkdir -p audit/incoming/{llvm,oiio,python,osl}
+          mkdir -p audit
+
+          errors=0
+
+          download_run() {
+            local label="$1"
+            local run_id="$2"
+            local destination="$3"
+            local metadata
+            local conclusion
+
+            echo
+            echo "========================================"
+            echo "Dependency: $label"
+            echo "Run ID: $run_id"
+            echo "========================================"
+
+            if [[ ! "$run_id" =~ ^[0-9]+$ ]]; then
+              echo "ERROR: Run ID is not numeric."
+              errors=$((errors + 1))
+              return
+            fi
+
+            if ! metadata="$(
+              gh run view "$run_id" \
+                --repo "$REPO" \
+                --json name,status,conclusion,url 2>&1
+            )"; then
+              echo "ERROR: Cannot inspect workflow run."
+              echo "$metadata"
+              errors=$((errors + 1))
+              return
+            fi
+
+            echo "$metadata"
+
+            conclusion="$(jq -r '.conclusion // ""' <<< "$metadata")"
+
+            if [[ "$conclusion" != "success" ]]; then
+              echo "ERROR: This run did not conclude successfully."
+              errors=$((errors + 1))
+              return
+            fi
+
+            if ! gh run download "$run_id" \
+                --repo "$REPO" \
+                --dir "$destination"; then
+              echo "ERROR: Artifact download failed."
+              echo "Artifacts may have expired or be unavailable."
+              errors=$((errors + 1))
+              return
+            fi
+
+            echo "Download command completed for $label."
+          }
+
+          download_run "LLVM/Clang" \
+            "$LLVM_RUN_ID" audit/incoming/llvm
+
+          download_run "OpenImageIO" \
+            "$OIIO_RUN_ID" audit/incoming/oiio
+
+          download_run "Android Python" \
+            "$PYTHON_RUN_ID" audit/incoming/python
+
+          download_run "Host OSL" \
+            "$OSL_RUN_ID" audit/incoming/osl
+
+          echo "count=$errors" >> "$GITHUB_OUTPUT"
+
+      - name: Inventory downloaded artifacts and package contents
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          REPORT="$GITHUB_WORKSPACE/audit/report.txt"
+
+          {
+            echo "BLENDER ANDROID DEPENDENCY AUDIT"
+            echo "Repository: $GITHUB_REPOSITORY"
+            echo "Commit: $GITHUB_SHA"
+            echo
+            echo "DOWNLOADED FILES"
+            echo "==============="
+          } > "$REPORT"
+
+          find audit/incoming -type f \
+            -printf '%p (%s bytes)\n' | sort >> "$REPORT"
+
+          {
+            echo
+            echo "ARCHIVE CONTENTS"
+            echo "================"
+          } >> "$REPORT"
+
+          while IFS= read -r -d '' archive; do
+            listing="$(mktemp)"
+
+            case "$archive" in
+              *.tar.gz|*.tgz)
+                if ! tar -tzf "$archive" > "$listing" 2>/dev/null; then
+                  echo "Cannot inspect: $archive" >> "$REPORT"
+                  rm -f "$listing"
+                  continue
+                fi
+                ;;
+              *.tar.xz|*.txz)
+                if ! tar -tJf "$archive" > "$listing" 2>/dev/null; then
+                  echo "Cannot inspect: $archive" >> "$REPORT"
+                  rm -f "$listing"
+                  continue
+                fi
+                ;;
+              *.tar.bz2|*.tbz2)
+                if ! tar -tjf "$archive" > "$listing" 2>/dev/null; then
+                  echo "Cannot inspect: $archive" >> "$REPORT"
+                  rm -f "$listing"
+                  continue
+                fi
+                ;;
+              *.tar)
+                if ! tar -tf "$archive" > "$listing" 2>/dev/null; then
+                  echo "Cannot inspect: $archive" >> "$REPORT"
+                  rm -f "$listing"
+                  continue
+                fi
+                ;;
+              *.zip)
+                if ! unzip -Z1 "$archive" > "$listing" 2>/dev/null; then
+                  echo "Cannot inspect: $archive" >> "$REPORT"
+                  rm -f "$listing"
+                  continue
+                fi
+                ;;
+              *)
+                rm -f "$listing"
+                continue
+                ;;
+            esac
+
+            {
+              echo
+              echo "Archive: $archive"
+              echo "Relevant package entries:"
+            } >> "$REPORT"
+
+            grep -Ei \
+              '(Config\.cmake$|Targets[^/]*\.cmake$|/bin/(clang|clang\+\+|oslc|python[0-9.]*)$|/include/clang/|/include/llvm/|/lib/.*\.(a|so([.][0-9]+)*)$|manifest\.txt$|\.oso$)' \
+              "$listing" | sed -n '1,120p' >> "$REPORT" || true
+
+            rm -f "$listing"
+
+          done < <(find audit/incoming -type f -print0)
+
+          {
+            echo
+            echo "NEXT STEP"
+            echo "========="
+            echo "This report inventories artifacts and package paths."
+            echo "It does not prove that Blender configures or builds."
+            echo "Check the actual CMake package paths before integration."
+          } >> "$REPORT"
+
+          cat "$REPORT"
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-dependency-audit-report
+          path: audit/report.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Fail if any dependency run was unavailable
+        if: always()
+        shell: bash
+        env:
+          DOWNLOAD_ERRORS: ${{ steps.fetch.outputs.count }}
+        run: |
+          if [[ "$DOWNLOAD_ERRORS" != "0" ]]; then
+            echo "::error::One or more dependency artifacts could not be downloaded."
+            echo "Read the workflow logs and audit report."
+            exit 1
+          fi
+
+          echo "All four dependency runs were inspected and downloaded."
