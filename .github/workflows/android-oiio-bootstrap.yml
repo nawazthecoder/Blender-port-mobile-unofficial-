@@ -18,6 +18,7 @@ env:
 
   FMT_VERSION: "12.1.0"
   ROBINMAP_VERSION: "v1.3.0"
+  PYSTRING_VERSION: "v1.1.4"
 
   ZLIB_VERSION: "v1.3.1"
   PNG_VERSION: "v1.6.50"
@@ -131,6 +132,10 @@ jobs:
             https://github.com/Tessil/robin-map.git \
             robinmap
 
+          git clone --depth 1 --branch "$PYSTRING_VERSION" \
+            https://github.com/imageworks/pystring.git \
+            pystring
+
           git clone --depth 1 --branch "$ZLIB_VERSION" \
             https://github.com/madler/zlib.git \
             zlib
@@ -161,6 +166,7 @@ jobs:
             opencolorio \
             fmt \
             robinmap \
+            pystring \
             zlib \
             png \
             jpeg \
@@ -468,6 +474,92 @@ jobs:
           test -f "$PREFIX/include/tsl/robin_map.h"
           test -f "$PREFIX/include/tsl/robin_set.h"
 
+      # FIX: build pystring 1.1.4 as an Android ARM64 static library.
+      # This makes the header and archive available in the final prefix,
+      # rather than relying on OCIO's temporary ext/dist directory.
+      - name: Build and install Android pystring
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cmake \
+            -S "$SRC/pystring" \
+            -B "$BUILD/pystring" \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DANDROID_STL=c++_static \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DBUILD_SHARED_LIBS=OFF \
+            2>&1 | tee "$LOGS/pystring-configure.log"
+
+          cmake --build "$BUILD/pystring" \
+            --parallel 2 \
+            2>&1 | tee "$LOGS/pystring-build.log"
+
+          cmake --install "$BUILD/pystring" \
+            2>&1 | tee "$LOGS/pystring-install.log"
+
+          PYSTRING_HEADER="$(
+            find "$PREFIX/include" \
+              -type f \
+              -name pystring.h \
+              -print \
+              -quit
+          )"
+
+          PYSTRING_LIBRARY="$(
+            find "$PREFIX/lib" \
+              -maxdepth 1 \
+              -type f \
+              -name libpystring.a \
+              -print \
+              -quit
+          )"
+
+          if [ -z "$PYSTRING_HEADER" ]; then
+            echo "ERROR: pystring.h was not installed"
+            find "$PREFIX/include" -maxdepth 3 -type f -print | sort
+            exit 1
+          fi
+
+          if [ -z "$PYSTRING_LIBRARY" ]; then
+            echo "ERROR: libpystring.a was not installed"
+            find "$PREFIX/lib" -maxdepth 1 -type f -print | sort
+            exit 1
+          fi
+
+          PYSTRING_INCLUDE_DIR="$(dirname "$PYSTRING_HEADER")"
+
+          echo "pystring header: $PYSTRING_HEADER"
+          echo "pystring include directory: $PYSTRING_INCLUDE_DIR"
+          echo "pystring library: $PYSTRING_LIBRARY"
+
+          echo "PYSTRING_INCLUDE_DIR=$PYSTRING_INCLUDE_DIR" \
+            >> "$GITHUB_ENV"
+
+          echo "PYSTRING_LIBRARY=$PYSTRING_LIBRARY" \
+            >> "$GITHUB_ENV"
+
+      - name: Verify pystring installation
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          test -f "$PYSTRING_INCLUDE_DIR/pystring.h"
+          test -f "$PYSTRING_LIBRARY"
+
+          echo "pystring header and static library are installed."
+          echo "Include directory: $PYSTRING_INCLUDE_DIR"
+          echo "Library: $PYSTRING_LIBRARY"
+
+          ar t "$PYSTRING_LIBRARY" | sed -n '1,10p'
+
       - name: Build OpenColorIO
         shell: bash
         run: |
@@ -487,7 +579,7 @@ jobs:
             -DCMAKE_PREFIX_PATH="$PREFIX" \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DBUILD_SHARED_LIBS=OFF \
-            -DOCIO_INSTALL_EXT_PACKAGES=ALL \
+            -DOCIO_INSTALL_EXT_PACKAGES=MISSING \
             -DOCIO_BUILD_APPS=OFF \
             -DOCIO_BUILD_OPENFX=OFF \
             -DOCIO_BUILD_NUKE=OFF \
@@ -498,11 +590,19 @@ jobs:
             -DOCIO_BUILD_JAVA=OFF \
             -DOCIO_USE_OIIO_FOR_APPS=OFF \
             -DImath_DIR="$PREFIX/lib/cmake/Imath" \
+            -Dpystring_ROOT="$PREFIX" \
+            -Dpystring_INCLUDE_DIR="$PYSTRING_INCLUDE_DIR" \
+            -Dpystring_LIBRARY="$PYSTRING_LIBRARY" \
             2>&1 | tee "$LOGS/opencolorio-configure.log"
+
+          echo
+          echo "========== OpenColorIO pystring configuration =========="
+
+          grep -i pystring "$BUILD/opencolorio/CMakeCache.txt" || true
 
           cmake --build "$BUILD/opencolorio" \
             --target install \
-            -j 2 \
+            --parallel 2 \
             2>&1 | tee "$LOGS/opencolorio-build.log"
 
       - name: Collect OpenColorIO bundled dependencies
@@ -510,11 +610,18 @@ jobs:
         run: |
           set -euxo pipefail
 
+          # Preserve the explicitly installed pystring 1.1.4 in PREFIX.
+          # OCIO_INSTALL_EXT_PACKAGES=MISSING should use that installation
+          # instead of rebuilding pystring inside ext/dist.
           if [ -d "$BUILD/opencolorio/ext/dist" ]; then
             cp -a \
               "$BUILD/opencolorio/ext/dist/." \
               "$PREFIX/"
           fi
+
+          # Verify that collection did not leave pystring absent.
+          test -f "$PYSTRING_INCLUDE_DIR/pystring.h"
+          test -f "$PYSTRING_LIBRARY"
 
           echo
           echo "OpenColorIO external dependency files:"
@@ -529,10 +636,19 @@ jobs:
             echo "No OCIO ext/dist directory."
           fi
 
+          echo
+          echo "Confirmed pystring installation:"
+          echo "$PYSTRING_INCLUDE_DIR/pystring.h"
+          echo "$PYSTRING_LIBRARY"
+
       - name: Configure OpenImageIO
         shell: bash
         run: |
           set -euxo pipefail
+
+          # Check pystring before the OIIO configure step.
+          test -f "$PYSTRING_INCLUDE_DIR/pystring.h"
+          test -f "$PYSTRING_LIBRARY"
 
           cmake \
             -S "$SRC/OpenImageIO" \
@@ -579,6 +695,9 @@ jobs:
             -DOpenEXR_DIR="$PREFIX/lib/cmake/OpenEXR" \
             -DOpenColorIO_DIR="$PREFIX/lib/cmake/OpenColorIO" \
             -Dfmt_DIR="$PREFIX/lib/cmake/fmt" \
+            -Dpystring_ROOT="$PREFIX" \
+            -Dpystring_INCLUDE_DIR="$PYSTRING_INCLUDE_DIR" \
+            -Dpystring_LIBRARY="$PYSTRING_LIBRARY" \
             2>&1 | tee "$LOGS/oiio-configure.log"
 
       - name: Verify OpenImageIO configuration
@@ -599,7 +718,7 @@ jobs:
 
           cmake --build "$BUILD/oiio" \
             --target install \
-            -j 2 \
+            --parallel 2 \
             2>&1 | tee "$LOGS/oiio-build.log"
 
       - name: Verify Android ARM64 libraries
@@ -674,9 +793,8 @@ jobs:
               ar x "$archive"
             )
 
-            # IMPORTANT:
-            # Do NOT use find | head here.
-            # With pipefail that can turn a successful find into SIGPIPE.
+            # Do not use find | head with pipefail:
+            # head can close the pipe early and trigger SIGPIPE.
             obj="$(
               find "$tmp" \
                 -type f \
@@ -717,6 +835,7 @@ jobs:
           OPENEXR_LIB="$(find_static 'libOpenEXR*.a')"
           OCIO_LIB="$(find_static 'libOpenColorIO*.a')"
           OIIO_LIB="$(find_static 'libOpenImageIO*.a')"
+          PYSTRING_LIB="$(find_static 'libpystring.a')"
 
           echo
           echo "Detected libraries:"
@@ -724,6 +843,7 @@ jobs:
           echo "  OpenEXR     = $OPENEXR_LIB"
           echo "  OpenColorIO = $OCIO_LIB"
           echo "  OpenImageIO = $OIIO_LIB"
+          echo "  pystring    = $PYSTRING_LIB"
 
           check_archive \
             "$IMATH_LIB" \
@@ -740,6 +860,10 @@ jobs:
           check_archive \
             "$OIIO_LIB" \
             "OpenImageIO"
+
+          check_archive \
+            "$PYSTRING_LIB" \
+            "pystring"
 
           echo
           echo "=========================================="
@@ -766,6 +890,7 @@ jobs:
             'libpng*.a'
             'libtiff*.a'
             'libz*.a'
+            'libpystring.a'
           )
 
           for pattern in "${required_patterns[@]}"; do
@@ -786,7 +911,10 @@ jobs:
             echo "FOUND: $result"
           done
 
+          test -f "$PYSTRING_INCLUDE_DIR/pystring.h"
+
           echo
+          echo "pystring header: $PYSTRING_INCLUDE_DIR/pystring.h"
           echo "All important dependency libraries are present."
 
       - name: Show final prefix
