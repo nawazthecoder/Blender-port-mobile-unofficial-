@@ -1,245 +1,371 @@
-name: Android dependency artifact audit
+name: Android OSL Target Configure Probe
 
 on:
   workflow_dispatch:
     inputs:
       llvm_run_id:
-        description: "Successful LLVM/Clang workflow run ID"
+        description: "Successful LLVM ARM64 run ID"
         required: true
-        type: string
         default: "37872328646"
-
+        type: string
       oiio_run_id:
-        description: "Successful OIIO workflow run ID"
+        description: "Successful OIIO ARM64 run ID"
         required: true
-        type: string
         default: "37616185108"
-
-      python_run_id:
-        description: "Successful Android Python workflow run ID"
-        required: true
         type: string
-        default: "37454200351"
-
-      osl_run_id:
-        description: "Successful host OSL workflow run ID"
-        required: true
-        type: string
-        default: "37496633775"
 
 permissions:
   actions: read
   contents: read
 
+env:
+  ANDROID_API: "29"
+  ANDROID_NDK_VERSION: "27.3.13750724"
+  OSL_VERSION: "v1.15.3.0"
+  PUGIXML_VERSION: "v1.10"
+
 jobs:
-  audit:
-    name: Download and inspect existing artifacts
+  configure:
+    name: Configure OSL for Android ARM64
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 45
 
     steps:
-      - name: Check GitHub CLI
-        run: gh --version
-
-      - name: Download existing successful-run artifacts
-        id: fetch
+      - name: Install host tools
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          LLVM_RUN_ID: ${{ inputs.llvm_run_id }}
-          OIIO_RUN_ID: ${{ inputs.oiio_run_id }}
-          PYTHON_RUN_ID: ${{ inputs.python_run_id }}
-          OSL_RUN_ID: ${{ inputs.osl_run_id }}
         run: |
-          set -uo pipefail
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake ninja-build git binutils \
+            python3 pkg-config
 
-          mkdir -p audit/incoming/{llvm,oiio,python,osl}
-          mkdir -p audit
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ""
 
-          errors=0
+      - name: Install Android NDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sdkmanager \
+            --sdk_root="$ANDROID_SDK_ROOT" \
+            "platforms;android-${ANDROID_API}" \
+            "ndk;${ANDROID_NDK_VERSION}"
 
-          download_run() {
-            local label="$1"
-            local run_id="$2"
-            local destination="$3"
-            local metadata
-            local conclusion
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}" \
+            >> "$GITHUB_ENV"
 
-            echo
-            echo "========================================"
-            echo "Dependency: $label"
-            echo "Run ID: $run_id"
-            echo "========================================"
+      - name: Download existing Android LLVM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: llvm-20.1.8-android-arm64
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.llvm_run_id }}
+          github-token: ${{ github.token }}
+          path: artifacts/llvm
 
-            if [[ ! "$run_id" =~ ^[0-9]+$ ]]; then
-              echo "ERROR: Run ID is not numeric."
-              errors=$((errors + 1))
-              return
-            fi
+      - name: Download existing Android OIIO artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: android-arm64-oiio
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.oiio_run_id }}
+          github-token: ${{ github.token }}
+          path: artifacts/oiio
 
-            if ! metadata="$(
-              gh run view "$run_id" \
-                --repo "$REPO" \
-                --json name,status,conclusion,url 2>&1
-            )"; then
-              echo "ERROR: Cannot inspect workflow run."
-              echo "$metadata"
-              errors=$((errors + 1))
-              return
-            fi
+      - name: Extract and locate target packages
+        shell: bash
+        run: |
+          set -euxo pipefail
 
-            echo "$metadata"
+          ROOT="$GITHUB_WORKSPACE/android-osl-probe"
+          mkdir -p "$ROOT/deps/llvm" "$ROOT/deps/oiio" "$ROOT/logs"
 
-            conclusion="$(jq -r '.conclusion // ""' <<< "$metadata")"
+          LLVM_ARCHIVE="$(
+            find artifacts/llvm -type f \
+              -name 'llvm-20.1.8-android-arm64.tar.gz' \
+              -print -quit
+          )"
+          OIIO_ARCHIVE="$(
+            find artifacts/oiio -type f \
+              -name 'android-arm64-oiio-prefix.tar.gz' \
+              -print -quit
+          )"
 
-            if [[ "$conclusion" != "success" ]]; then
-              echo "ERROR: This run did not conclude successfully."
-              errors=$((errors + 1))
-              return
-            fi
+          test -n "$LLVM_ARCHIVE"
+          test -n "$OIIO_ARCHIVE"
+          test -f "$LLVM_ARCHIVE"
+          test -f "$OIIO_ARCHIVE"
 
-            if ! gh run download "$run_id" \
-                --repo "$REPO" \
-                --dir "$destination"; then
-              echo "ERROR: Artifact download failed."
-              echo "Artifacts may have expired or be unavailable."
-              errors=$((errors + 1))
-              return
-            fi
+          tar -xzf "$LLVM_ARCHIVE" -C "$ROOT/deps/llvm"
+          tar -xzf "$OIIO_ARCHIVE" -C "$ROOT/deps/oiio"
 
-            echo "Download command completed for $label."
+          locate_config() {
+            local base="$1"
+            shift
+            find "$base" \( "$@" \) -print -quit
           }
 
-          download_run "LLVM/Clang" \
-            "$LLVM_RUN_ID" audit/incoming/llvm
+          LLVM_CONFIG="$(
+            find "$ROOT/deps/llvm" \
+              -name LLVMConfig.cmake -print -quit
+          )"
+          CLANG_CONFIG="$(
+            find "$ROOT/deps/llvm" \
+              -name ClangConfig.cmake -print -quit
+          )"
+          OIIO_CONFIG="$(
+            find "$ROOT/deps/oiio" \
+              -name OpenImageIOConfig.cmake -print -quit
+          )"
+          IMATH_CONFIG="$(
+            find "$ROOT/deps/oiio" \
+              -name ImathConfig.cmake -print -quit
+          )"
+          OPENEXR_CONFIG="$(
+            find "$ROOT/deps/oiio" \
+              -name OpenEXRConfig.cmake -print -quit
+          )"
+          OCIO_CONFIG="$(
+            find "$ROOT/deps/oiio" \
+              -name OpenColorIOConfig.cmake -print -quit
+          )"
 
-          download_run "OpenImageIO" \
-            "$OIIO_RUN_ID" audit/incoming/oiio
+          for item in \
+            LLVM_CONFIG CLANG_CONFIG OIIO_CONFIG \
+            IMATH_CONFIG OPENEXR_CONFIG OCIO_CONFIG; do
+            value="${!item}"
+            if [[ -z "$value" || ! -f "$value" ]]; then
+              echo "::error::Required CMake package file missing: $item"
+              echo "Search results:"
+              find "$ROOT/deps" \
+                \( -iname '*imath*config*.cmake' \
+                   -o -iname '*openexr*config*.cmake' \
+                   -o -iname '*opencolorio*config*.cmake' \
+                   -o -iname '*openimageio*config*.cmake' \
+                   -o -iname '*llvmconfig.cmake' \
+                   -o -iname '*clangconfig.cmake' \) \
+                -print | sort
+              exit 1
+            fi
+            echo "$item=$value"
+          done
 
-          download_run "Android Python" \
-            "$PYTHON_RUN_ID" audit/incoming/python
+          LLVM_PREFIX="$(
+            cd "$(dirname "$LLVM_CONFIG")/../../.." && pwd
+          )"
+          OIIO_PREFIX="$(
+            cd "$(dirname "$OIIO_CONFIG")/../../.." && pwd
+          )"
 
-          download_run "Host OSL" \
-            "$OSL_RUN_ID" audit/incoming/osl
+          LLVM_CONFIG_DIR="$(dirname "$LLVM_CONFIG")"
+          CLANG_CONFIG_DIR="$(dirname "$CLANG_CONFIG")"
+          OIIO_CONFIG_DIR="$(dirname "$OIIO_CONFIG")"
+          IMATH_CONFIG_DIR="$(dirname "$IMATH_CONFIG")"
+          OPENEXR_CONFIG_DIR="$(dirname "$OPENEXR_CONFIG")"
+          OCIO_CONFIG_DIR="$(dirname "$OCIO_CONFIG")"
 
-          echo "count=$errors" >> "$GITHUB_OUTPUT"
+          {
+            echo "LLVM_PREFIX=$LLVM_PREFIX"
+            echo "OIIO_PREFIX=$OIIO_PREFIX"
+            echo "LLVM_CONFIG_DIR=$LLVM_CONFIG_DIR"
+            echo "CLANG_CONFIG_DIR=$CLANG_CONFIG_DIR"
+            echo "OIIO_CONFIG_DIR=$OIIO_CONFIG_DIR"
+            echo "IMATH_CONFIG_DIR=$IMATH_CONFIG_DIR"
+            echo "OPENEXR_CONFIG_DIR=$OPENEXR_CONFIG_DIR"
+            echo "OCIO_CONFIG_DIR=$OCIO_CONFIG_DIR"
+            echo "OSL_PROBE_ROOT=$ROOT"
+          } >> "$GITHUB_ENV"
 
-      - name: Inventory downloaded artifacts and package contents
-        if: always()
+          {
+            echo "LLVM archive: $LLVM_ARCHIVE"
+            echo "OIIO archive: $OIIO_ARCHIVE"
+            echo "LLVM prefix: $LLVM_PREFIX"
+            echo "OIIO prefix: $OIIO_PREFIX"
+            echo "LLVM config: $LLVM_CONFIG"
+            echo "Clang config: $CLANG_CONFIG"
+            echo "OIIO config: $OIIO_CONFIG"
+            echo "Imath config: $IMATH_CONFIG"
+            echo "OpenEXR config: $OPENEXR_CONFIG"
+            echo "OpenColorIO config: $OCIO_CONFIG"
+          } | tee "$ROOT/logs/dependency-paths.txt"
+
+          echo "All required dependency config files were located."
+
+      - name: Build missing Android pugixml dependency
         shell: bash
         run: |
-          set -uo pipefail
+          set -euxo pipefail
 
-          REPORT="$GITHUB_WORKSPACE/audit/report.txt"
+          ROOT="$OSL_PROBE_ROOT"
+          SRC="$ROOT/pugixml-source"
+          BUILD="$ROOT/pugixml-build"
+          PREFIX="$ROOT/deps/pugixml"
+          LOG="$ROOT/logs/pugixml-build.log"
 
-          {
-            echo "BLENDER ANDROID DEPENDENCY AUDIT"
-            echo "Repository: $GITHUB_REPOSITORY"
-            echo "Commit: $GITHUB_SHA"
-            echo
-            echo "DOWNLOADED FILES"
-            echo "==============="
-          } > "$REPORT"
+          git clone \
+            --depth 1 \
+            --branch "$PUGIXML_VERSION" \
+            https://github.com/zeux/pugixml.git \
+            "$SRC"
 
-          find audit/incoming -type f \
-            -printf '%p (%s bytes)\n' | sort >> "$REPORT"
+          git -C "$SRC" rev-parse HEAD \
+            | tee "$ROOT/logs/pugixml-source-commit.txt"
 
-          {
-            echo
-            echo "ARCHIVE CONTENTS"
-            echo "================"
-          } >> "$REPORT"
+          cmake \
+            -S "$SRC" \
+            -B "$BUILD" \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTS=OFF \
+            -DPUGIXML_BUILD_TESTS=OFF \
+            2>&1 | tee "$ROOT/logs/pugixml-configure.log"
 
-          while IFS= read -r -d '' archive; do
-            listing="$(mktemp)"
+          cmake --build "$BUILD" --parallel 2 2>&1 | tee "$LOG"
+          cmake --install "$BUILD" 2>&1 \
+            | tee "$ROOT/logs/pugixml-install.log"
 
-            case "$archive" in
-              *.tar.gz|*.tgz)
-                if ! tar -tzf "$archive" > "$listing" 2>/dev/null; then
-                  echo "Cannot inspect: $archive" >> "$REPORT"
-                  rm -f "$listing"
-                  continue
-                fi
-                ;;
-              *.tar.xz|*.txz)
-                if ! tar -tJf "$archive" > "$listing" 2>/dev/null; then
-                  echo "Cannot inspect: $archive" >> "$REPORT"
-                  rm -f "$listing"
-                  continue
-                fi
-                ;;
-              *.tar.bz2|*.tbz2)
-                if ! tar -tjf "$archive" > "$listing" 2>/dev/null; then
-                  echo "Cannot inspect: $archive" >> "$REPORT"
-                  rm -f "$listing"
-                  continue
-                fi
-                ;;
-              *.tar)
-                if ! tar -tf "$archive" > "$listing" 2>/dev/null; then
-                  echo "Cannot inspect: $archive" >> "$REPORT"
-                  rm -f "$listing"
-                  continue
-                fi
-                ;;
-              *.zip)
-                if ! unzip -Z1 "$archive" > "$listing" 2>/dev/null; then
-                  echo "Cannot inspect: $archive" >> "$REPORT"
-                  rm -f "$listing"
-                  continue
-                fi
-                ;;
-              *)
-                rm -f "$listing"
-                continue
-                ;;
-            esac
+          PUGI_CONFIG="$(
+            find "$PREFIX" \
+              \( -iname 'pugixml-config.cmake' \
+                 -o -iname 'pugixmlConfig.cmake' \) \
+              -print -quit
+          )"
 
-            {
-              echo
-              echo "Archive: $archive"
-              echo "Relevant package entries:"
-            } >> "$REPORT"
+          PUGI_LIBRARY="$(
+            find "$PREFIX/lib" -name 'libpugixml.a' -print -quit
+          )"
 
-            grep -Ei \
-              '(Config\.cmake$|Targets[^/]*\.cmake$|/bin/(clang|clang\+\+|oslc|python[0-9.]*)$|/include/clang/|/include/llvm/|/lib/.*\.(a|so([.][0-9]+)*)$|manifest\.txt$|\.oso$)' \
-              "$listing" | sed -n '1,120p' >> "$REPORT" || true
+          test -n "$PUGI_CONFIG"
+          test -f "$PUGI_CONFIG"
+          test -n "$PUGI_LIBRARY"
+          test -f "$PUGI_LIBRARY"
 
-            rm -f "$listing"
+          MEMBER="$(ar t "$PUGI_LIBRARY" | sed -n '1p')"
+          test -n "$MEMBER"
+          OBJECT="$(mktemp)"
+          ar p "$PUGI_LIBRARY" "$MEMBER" > "$OBJECT"
 
-          done < <(find audit/incoming -type f -print0)
+          readelf -h "$OBJECT" | tee "$ROOT/logs/pugixml-elf.txt"
+          readelf -h "$OBJECT" | grep -Eq 'Machine:.*AArch64'
+          rm -f "$OBJECT"
+
+          PUGIXML_CONFIG_DIR="$(dirname "$PUGI_CONFIG")"
 
           {
-            echo
-            echo "NEXT STEP"
-            echo "========="
-            echo "This report inventories artifacts and package paths."
-            echo "It does not prove that Blender configures or builds."
-            echo "Check the actual CMake package paths before integration."
-          } >> "$REPORT"
+            echo "PUGIXML_PREFIX=$PREFIX"
+            echo "PUGIXML_CONFIG_DIR=$PUGIXML_CONFIG_DIR"
+            echo "PUGIXML_LIBRARY=$PUGI_LIBRARY"
+          } >> "$GITHUB_ENV"
 
-          cat "$REPORT"
+          {
+            echo "Pugixml config: $PUGI_CONFIG"
+            echo "Pugixml library: $PUGI_LIBRARY"
+            echo "Pugixml ELF architecture: AArch64"
+          } | tee "$ROOT/logs/pugixml-package-summary.txt"
 
-      - name: Upload audit report
+      - name: Fetch exact OSL source
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          git clone \
+            --depth 1 \
+            --branch "$OSL_VERSION" \
+            https://github.com/AcademySoftwareFoundation/OpenShadingLanguage.git \
+            "$OSL_PROBE_ROOT/source"
+
+          git -C "$OSL_PROBE_ROOT/source" rev-parse HEAD \
+            | tee "$OSL_PROBE_ROOT/logs/osl-source-commit.txt"
+
+      - name: Configure OSL for Android ARM64
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          ROOT="$OSL_PROBE_ROOT"
+          BUILD="$ROOT/build"
+          PREFIX="$ROOT/install"
+          LOG="$ROOT/logs/osl-target-configure.log"
+
+          mkdir -p "$BUILD" "$PREFIX"
+
+          cmake \
+            -S "$ROOT/source" \
+            -B "$BUILD" \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            "-DCMAKE_PREFIX_PATH=${PUGIXML_PREFIX};${OIIO_PREFIX};${LLVM_PREFIX}" \
+            "-DLLVM_DIR=${LLVM_CONFIG_DIR}" \
+            "-DClang_DIR=${CLANG_CONFIG_DIR}" \
+            "-DOpenImageIO_DIR=${OIIO_CONFIG_DIR}" \
+            "-DImath_DIR=${IMATH_CONFIG_DIR}" \
+            "-DOpenEXR_DIR=${OPENEXR_CONFIG_DIR}" \
+            "-DOpenColorIO_DIR=${OCIO_CONFIG_DIR}" \
+            "-Dpugixml_DIR=${PUGIXML_CONFIG_DIR}" \
+            "-DPUGIXML_HOME=${PUGIXML_PREFIX}" \
+            "-DZLIB_ROOT=${OIIO_PREFIX}" \
+            -DBUILD_MISSING_DEPS=OFF \
+            -DBUILD_ROBINMAP_FORCE=OFF \
+            -DOSL_BUILD_TESTS=OFF \
+            -DOSL_BUILD_PLUGINS=OFF \
+            -DOSL_BUILD_SHADERS=OFF \
+            -DUSE_LLVM_BITCODE=OFF \
+            -DOSL_USE_OPTIX=OFF \
+            -DUSE_PYTHON=OFF \
+            -DUSE_QT=OFF \
+            -DINSTALL_DOCS=OFF \
+            2>&1 | tee "$LOG"
+
+      - name: Validate OSL configure cache
+        if: success()
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          ROOT="$OSL_PROBE_ROOT"
+          CACHE="$ROOT/build/CMakeCache.txt"
+          LOG="$ROOT/logs/osl-target-configure.log"
+
+          test -f "$CACHE"
+          grep -Eq 'CMake system name[[:space:]]*=[[:space:]]*Android' "$LOG"
+
+          grep -E \
+            '^(LLVM_DIR|Clang_DIR|OpenImageIO_DIR|Imath_DIR|OpenEXR_DIR|OpenColorIO_DIR|pugixml_DIR|CMAKE_ANDROID_ARCH_ABI|OSL_BUILD_TESTS|OSL_BUILD_PLUGINS|OSL_BUILD_SHADERS|USE_LLVM_BITCODE):' \
+            "$CACHE" \
+            | tee "$ROOT/logs/configure-cache-summary.txt"
+
+          grep -F "OSL_BUILD_TESTS:BOOL=OFF" "$CACHE"
+          grep -F "OSL_BUILD_SHADERS:BOOL=OFF" "$CACHE"
+          grep -F "USE_LLVM_BITCODE:BOOL=OFF" "$CACHE"
+
+          echo "OSL CMake configuration succeeded for Android."
+          echo "This is configure-only; OSL libraries have not yet been built."
+
+      - name: Upload configure diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: android-dependency-audit-report
-          path: audit/report.txt
+          name: android-osl-target-configure-report
+          path: |
+            android-osl-probe/logs/
+            android-osl-probe/build/CMakeCache.txt
+            android-osl-probe/build/CMakeFiles/CMakeConfigureLog.yaml
+            android-osl-probe/build/CMakeFiles/CMakeError.log
+            android-osl-probe/build/CMakeFiles/CMakeOutput.log
           if-no-files-found: warn
           retention-days: 14
-
-      - name: Fail if any dependency run was unavailable
-        if: always()
-        shell: bash
-        env:
-          DOWNLOAD_ERRORS: ${{ steps.fetch.outputs.count }}
-        run: |
-          if [[ "$DOWNLOAD_ERRORS" != "0" ]]; then
-            echo "::error::One or more dependency artifacts could not be downloaded."
-            echo "Read the workflow logs and audit report."
-            exit 1
-          fi
-
-          echo "All four dependency runs were inspected and downloaded."
