@@ -1,0 +1,299 @@
+
+name: Android TIFF and OIIO Package Diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      llvm_run_id:
+        description: Successful LLVM ARM64 run ID
+        required: true
+        default: "37872328646"
+        type: string
+      oiio_run_id:
+        description: Successful OIIO ARM64 run ID
+        required: true
+        default: "37616185108"
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  ANDROID_API: "29"
+  ANDROID_NDK_VERSION: "27.3.13750724"
+
+jobs:
+  diagnose:
+    name: Diagnose TIFF and OpenImageIO discovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Install host tools
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build binutils
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ""
+
+      - name: Install Android NDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sdkmanager \
+            --sdk_root="$ANDROID_SDK_ROOT" \
+            "platforms;android-${ANDROID_API}" \
+            "ndk;${ANDROID_NDK_VERSION}"
+
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}" \
+            >> "$GITHUB_ENV"
+
+      - name: Download existing LLVM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: llvm-20.1.8-android-arm64
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.llvm_run_id }}
+          github-token: ${{ github.token }}
+          path: artifacts/llvm
+
+      - name: Download existing OIIO artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: android-arm64-oiio
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.oiio_run_id }}
+          github-token: ${{ github.token }}
+          path: artifacts/oiio
+
+      - name: Extract artifacts and identify TIFF files
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          ROOT="$GITHUB_WORKSPACE/tiff-oiio-diagnostic"
+          mkdir -p "$ROOT/deps/llvm" "$ROOT/deps/oiio" "$ROOT/logs"
+
+          LLVM_ARCHIVE="$(
+            find artifacts/llvm -type f \
+              -name 'llvm-20.1.8-android-arm64.tar.gz' \
+              -print -quit
+          )"
+          OIIO_ARCHIVE="$(
+            find artifacts/oiio -type f \
+              -name 'android-arm64-oiio-prefix.tar.gz' \
+              -print -quit
+          )"
+
+          test -n "$LLVM_ARCHIVE"
+          test -n "$OIIO_ARCHIVE"
+          test -f "$LLVM_ARCHIVE"
+          test -f "$OIIO_ARCHIVE"
+
+          tar -xzf "$LLVM_ARCHIVE" -C "$ROOT/deps/llvm"
+          tar -xzf "$OIIO_ARCHIVE" -C "$ROOT/deps/oiio"
+
+          LLVM_CONFIG="$(
+            find "$ROOT/deps/llvm" \
+              -name LLVMConfig.cmake -print -quit
+          )"
+          OIIO_CONFIG="$(
+            find "$ROOT/deps/oiio" \
+              -name OpenImageIOConfig.cmake -print -quit
+          )"
+          TIFF_LIBRARY="$(
+            find "$ROOT/deps/oiio/lib" \
+              -name libtiff.a -print -quit
+          )"
+          TIFF_HEADER="$(
+            find "$ROOT/deps/oiio/include" \
+              -name tiffio.h -print -quit
+          )"
+
+          for item in LLVM_CONFIG OIIO_CONFIG TIFF_LIBRARY TIFF_HEADER; do
+            value="${!item}"
+            if [[ -z "$value" || ! -f "$value" ]]; then
+              echo "::error::Missing required file: $item"
+              find "$ROOT/deps" \
+                \( -iname '*tiff*' -o -iname '*TIFF*' \
+                   -o -name '*Config.cmake' \) \
+                -print | sort \
+                > "$ROOT/logs/discovered-files.txt"
+              cat "$ROOT/logs/discovered-files.txt"
+              exit 1
+            fi
+          done
+
+          LLVM_PREFIX="$(
+            cd "$(dirname "$LLVM_CONFIG")/../../.." && pwd
+          )"
+          OIIO_PREFIX="$(
+            cd "$(dirname "$OIIO_CONFIG")/../../.." && pwd
+          )"
+          LLVM_CONFIG_DIR="$(dirname "$LLVM_CONFIG")"
+          OIIO_CONFIG_DIR="$(dirname "$OIIO_CONFIG")"
+          TIFF_INCLUDE_DIR="$(dirname "$TIFF_HEADER")"
+
+          {
+            echo "ROOT=$ROOT"
+            echo "LLVM_PREFIX=$LLVM_PREFIX"
+            echo "OIIO_PREFIX=$OIIO_PREFIX"
+            echo "LLVM_CONFIG_DIR=$LLVM_CONFIG_DIR"
+            echo "OIIO_CONFIG_DIR=$OIIO_CONFIG_DIR"
+            echo "TIFF_LIBRARY=$TIFF_LIBRARY"
+            echo "TIFF_INCLUDE_DIR=$TIFF_INCLUDE_DIR"
+          } >> "$GITHUB_ENV"
+
+          {
+            echo "Artifact archive files:"
+            echo "$LLVM_ARCHIVE"
+            echo "$OIIO_ARCHIVE"
+            echo
+            echo "Package configurations:"
+            find "$ROOT/deps" -type f \
+              \( -iname '*tiff*config*.cmake' \
+                 -o -iname '*tiff*targets*.cmake' \
+                 -o -name '*Config.cmake' \) \
+              -print | sort
+            echo
+            echo "TIFF static library:"
+            echo "$TIFF_LIBRARY"
+            echo
+            echo "TIFF include directory:"
+            echo "$TIFF_INCLUDE_DIR"
+          } | tee "$ROOT/logs/package-inventory.txt"
+
+      - name: Create minimal package probes
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          mkdir -p "$ROOT/probe-tiff" "$ROOT/probe-oiio"
+
+          cat > "$ROOT/probe-tiff/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.20)
+          project(TIFFProbe LANGUAGES C CXX)
+
+          message(STATUS "TIFF_LIBRARY=${TIFF_LIBRARY}")
+          message(STATUS "TIFF_LIBRARY_RELEASE=${TIFF_LIBRARY_RELEASE}")
+          message(STATUS "TIFF_INCLUDE_DIR=${TIFF_INCLUDE_DIR}")
+
+          find_package(TIFF MODULE REQUIRED)
+
+          message(STATUS "TIFF_FOUND=${TIFF_FOUND}")
+          message(STATUS "TIFF_LIBRARIES=${TIFF_LIBRARIES}")
+          message(STATUS "TIFF_INCLUDE_DIRS=${TIFF_INCLUDE_DIRS}")
+
+          if(TARGET TIFF::TIFF)
+            get_target_property(TIFF_TARGET TIFF::TIFF IMPORTED_LOCATION)
+            message(STATUS "TIFF::TIFF IMPORTED_LOCATION=${TIFF_TARGET}")
+          else()
+            message(STATUS "TIFF::TIFF target was not created")
+          endif()
+          CMAKE
+
+          cat > "$ROOT/probe-oiio/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.20)
+          project(OIIOProbe LANGUAGES C CXX)
+
+          message(STATUS "OpenImageIO_DIR=${OpenImageIO_DIR}")
+          message(STATUS "TIFF_LIBRARY=${TIFF_LIBRARY}")
+          message(STATUS "TIFF_LIBRARY_RELEASE=${TIFF_LIBRARY_RELEASE}")
+          message(STATUS "TIFF_INCLUDE_DIR=${TIFF_INCLUDE_DIR}")
+
+          find_package(OpenImageIO CONFIG REQUIRED)
+
+          message(STATUS "OpenImageIO_FOUND=${OpenImageIO_FOUND}")
+          message(STATUS "OpenImageIO_VERSION=${OpenImageIO_VERSION}")
+
+          if(TARGET OpenImageIO::OpenImageIO)
+            message(STATUS "OpenImageIO::OpenImageIO target exists")
+          else()
+            message(STATUS "OpenImageIO::OpenImageIO target absent")
+          endif()
+          CMAKE
+
+      - name: Probe TIFF and OpenImageIO independently
+        id: probes
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          ROOT="$GITHUB_WORKSPACE/tiff-oiio-diagnostic"
+          TOOLCHAIN="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake"
+
+          mkdir -p "$ROOT/build-tiff" "$ROOT/build-oiio"
+
+          echo "Running the standalone TIFF module probe..."
+          set +e
+          cmake \
+            -S "$ROOT/probe-tiff" \
+            -B "$ROOT/build-tiff" \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DCMAKE_FIND_DEBUG_MODE=ON \
+            "-DTIFF_LIBRARY=$TIFF_LIBRARY" \
+            "-DTIFF_LIBRARY_RELEASE=$TIFF_LIBRARY" \
+            "-DTIFF_INCLUDE_DIR=$TIFF_INCLUDE_DIR" \
+            2>&1 | tee "$ROOT/logs/tiff-probe.log"
+          TIFF_RC=${PIPESTATUS[0]}
+          set -e
+          echo "TIFF probe exit code: $TIFF_RC"
+
+          echo "Running the OpenImageIO config-package probe..."
+          set +e
+          cmake \
+            -S "$ROOT/probe-oiio" \
+            -B "$ROOT/build-oiio" \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DCMAKE_FIND_DEBUG_MODE=ON \
+            "-DCMAKE_PREFIX_PATH=${OIIO_PREFIX};${LLVM_PREFIX}" \
+            "-DOpenImageIO_DIR=${OIIO_CONFIG_DIR}" \
+            "-DTIFF_LIBRARY=$TIFF_LIBRARY" \
+            "-DTIFF_LIBRARY_RELEASE=$TIFF_LIBRARY" \
+            "-DTIFF_INCLUDE_DIR=$TIFF_INCLUDE_DIR" \
+            2>&1 | tee "$ROOT/logs/oiio-probe.log"
+          OIIO_RC=${PIPESTATUS[0]}
+          set -e
+          echo "OpenImageIO probe exit code: $OIIO_RC"
+
+          {
+            echo "TIFF_PROBE_EXIT_CODE=$TIFF_RC"
+            echo "OIIO_PROBE_EXIT_CODE=$OIIO_RC"
+          } | tee "$ROOT/logs/probe-status.txt"
+
+          echo "TIFF_RC=$TIFF_RC" >> "$GITHUB_OUTPUT"
+          echo "OIIO_RC=$OIIO_RC" >> "$GITHUB_OUTPUT"
+
+      - name: Upload diagnostic results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-tiff-oiio-diagnostic-report
+          path: tiff-oiio-diagnostic/logs/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Set final status
+        if: always()
+        shell: bash
+        env:
+          TIFF_RC: ${{ steps.probes.outputs.TIFF_RC }}
+          OIIO_RC: ${{ steps.probes.outputs.OIIO_RC }}
+        run: |
+          if [[ "$TIFF_RC" != "0" || "$OIIO_RC" != "0" ]]; then
+            echo "::error::At least one package-discovery probe failed."
+            echo "Download android-tiff-oiio-diagnostic-report."
+            exit 1
+          fi
+          echo "Both TIFF and OpenImageIO discovery probes succeeded."
