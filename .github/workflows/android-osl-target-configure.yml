@@ -1,15 +1,16 @@
+
 name: Android OSL Target Configure Probe
 
 on:
   workflow_dispatch:
     inputs:
       llvm_run_id:
-        description: Successful LLVM ARM64 run ID
+        description: "Successful LLVM ARM64 run ID"
         required: true
         default: "37872328646"
         type: string
       oiio_run_id:
-        description: Successful OIIO ARM64 run ID
+        description: "Successful OIIO ARM64 run ID"
         required: true
         default: "37616185108"
         type: string
@@ -22,12 +23,13 @@ env:
   ANDROID_API: "29"
   ANDROID_NDK_VERSION: "27.3.13750724"
   OSL_VERSION: "v1.15.3.0"
+  PUGIXML_VERSION: "v1.10"
 
 jobs:
   configure:
     name: Configure OSL for Android ARM64
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Install host tools
@@ -48,7 +50,6 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-
           sdkmanager \
             --sdk_root="$ANDROID_SDK_ROOT" \
             "platforms;android-${ANDROID_API}" \
@@ -75,16 +76,13 @@ jobs:
           github-token: ${{ github.token }}
           path: artifacts/oiio
 
-      - name: Extract and verify target dependency prefixes
+      - name: Extract and verify target dependency packages
         shell: bash
         run: |
           set -euxo pipefail
 
           ROOT="$GITHUB_WORKSPACE/android-osl-probe"
-          mkdir -p \
-            "$ROOT/deps/llvm" \
-            "$ROOT/deps/oiio" \
-            "$ROOT/logs"
+          mkdir -p "$ROOT/deps/llvm" "$ROOT/deps/oiio" "$ROOT/logs"
 
           LLVM_ARCHIVE="$(
             find artifacts/llvm -type f \
@@ -103,105 +101,212 @@ jobs:
           test -f "$LLVM_ARCHIVE"
           test -f "$OIIO_ARCHIVE"
 
-          echo "LLVM archive: $LLVM_ARCHIVE"
-          echo "OIIO archive: $OIIO_ARCHIVE"
-
-          tar -xzf "$LLVM_ARCHIVE" \
-            -C "$ROOT/deps/llvm"
-
-          tar -xzf "$OIIO_ARCHIVE" \
-            -C "$ROOT/deps/oiio"
+          tar -xzf "$LLVM_ARCHIVE" -C "$ROOT/deps/llvm"
+          tar -xzf "$OIIO_ARCHIVE" -C "$ROOT/deps/oiio"
 
           LLVM_CONFIG="$(
-            find "$ROOT/deps/llvm" -type f \
+            find "$ROOT/deps/llvm" \
               -name LLVMConfig.cmake -print -quit
           )"
-
           CLANG_CONFIG="$(
-            find "$ROOT/deps/llvm" -type f \
+            find "$ROOT/deps/llvm" \
               -name ClangConfig.cmake -print -quit
           )"
-
           OIIO_CONFIG="$(
-            find "$ROOT/deps/oiio" -type f \
+            find "$ROOT/deps/oiio" \
               -name OpenImageIOConfig.cmake -print -quit
           )"
-
-          test -n "$LLVM_CONFIG"
-          test -n "$CLANG_CONFIG"
-          test -n "$OIIO_CONFIG"
-
-          LLVM_PREFIX="$(
-            cd "$(dirname "$LLVM_CONFIG")/../../.." && pwd
+          IMATH_CONFIG="$(
+            find "$ROOT/deps/oiio" \
+              -name ImathConfig.cmake -print -quit
+          )"
+          OPENEXR_CONFIG="$(
+            find "$ROOT/deps/oiio" \
+              -name OpenEXRConfig.cmake -print -quit
+          )"
+          OCIO_CONFIG="$(
+            find "$ROOT/deps/oiio" \
+              -name OpenColorIOConfig.cmake -print -quit
           )"
 
-          OIIO_PREFIX="$(
-            cd "$(dirname "$OIIO_CONFIG")/../../.." && pwd
-          )"
-
-          LLVM_LIB="$(
-            find "$LLVM_PREFIX/lib" -type f \
-              -name 'libLLVM*.a' -print -quit
-          )"
-
-          OIIO_LIB="$(
-            find "$OIIO_PREFIX/lib" -type f \
-              -name 'libOpenImageIO*.a' -print -quit
-          )"
-
-          test -n "$LLVM_LIB"
-          test -n "$OIIO_LIB"
-
-          verify_aarch64_archive() {
-            local archive="$1"
-            local member object header
-
-            member="$(ar t "$archive" | sed -n '1p')"
-            test -n "$member"
-
-            object="$(mktemp)"
-            header="$(mktemp)"
-
-            ar p "$archive" "$member" > "$object"
-            readelf -h "$object" > "$header"
-
-            if ! grep -Eq 'Machine:.*AArch64' "$header"; then
-              echo "::error::Not an AArch64 ELF object: $archive"
-              cat "$header"
-              rm -f "$object" "$header"
-              return 1
+          for item in \
+            LLVM_CONFIG CLANG_CONFIG OIIO_CONFIG \
+            IMATH_CONFIG OPENEXR_CONFIG OCIO_CONFIG; do
+            value="${!item}"
+            if [[ -z "$value" || ! -f "$value" ]]; then
+              echo "::error::Missing CMake package: $item"
+              find "$ROOT/deps" -iname '*Config.cmake' -print | sort
+              exit 1
             fi
+          done
 
-            echo "AArch64 verified: $archive"
-            rm -f "$object" "$header"
+          LLVM_PREFIX="$(cd "$(dirname "$LLVM_CONFIG")/../../.." && pwd)"
+          OIIO_PREFIX="$(cd "$(dirname "$OIIO_CONFIG")/../../.." && pwd)"
+
+          # Use files from the Android dependency prefix explicitly.
+          find_file() {
+            local base="$1"
+            local pattern="$2"
+            find "$base" -type f -name "$pattern" -print -quit
           }
 
-          verify_aarch64_archive "$LLVM_LIB"
-          verify_aarch64_archive "$OIIO_LIB"
+          TIFF_LIBRARY="$(find_file "$OIIO_PREFIX/lib" 'libtiff.a')"
+          JPEG_LIBRARY="$(find_file "$OIIO_PREFIX/lib" 'libjpeg.a')"
+          PNG_LIBRARY="$(find_file "$OIIO_PREFIX/lib" 'libpng16.a')"
+          ZLIB_LIBRARY="$(find_file "$OIIO_PREFIX/lib" 'libz.a')"
+
+          TIFF_HEADER="$(find_file "$OIIO_PREFIX/include" 'tiffio.h')"
+          JPEG_HEADER="$(find_file "$OIIO_PREFIX/include" 'jpeglib.h')"
+          PNG_HEADER="$(find_file "$OIIO_PREFIX/include" 'png.h')"
+          ZLIB_HEADER="$(find_file "$OIIO_PREFIX/include" 'zlib.h')"
+
+          for item in \
+            TIFF_LIBRARY JPEG_LIBRARY PNG_LIBRARY ZLIB_LIBRARY \
+            TIFF_HEADER JPEG_HEADER PNG_HEADER ZLIB_HEADER; do
+            value="${!item}"
+            if [[ -z "$value" || ! -f "$value" ]]; then
+              echo "::error::Missing target dependency file: $item"
+              echo "OIIO prefix: $OIIO_PREFIX"
+              find "$OIIO_PREFIX" -maxdepth 4 -type f \
+                \( -name '*.a' -o -name 'tiffio.h' \
+                   -o -name 'jpeglib.h' -o -name 'png.h' \
+                   -o -name 'zlib.h' \) -print | sort
+              exit 1
+            fi
+          done
+
+          TIFF_INCLUDE_DIR="$(dirname "$TIFF_HEADER")"
+          JPEG_INCLUDE_DIR="$(dirname "$JPEG_HEADER")"
+          PNG_INCLUDE_DIR="$(dirname "$PNG_HEADER")"
+          ZLIB_INCLUDE_DIR="$(dirname "$ZLIB_HEADER")"
+
+          LLVM_CONFIG_DIR="$(dirname "$LLVM_CONFIG")"
+          CLANG_CONFIG_DIR="$(dirname "$CLANG_CONFIG")"
+          OIIO_CONFIG_DIR="$(dirname "$OIIO_CONFIG")"
+          IMATH_CONFIG_DIR="$(dirname "$IMATH_CONFIG")"
+          OPENEXR_CONFIG_DIR="$(dirname "$OPENEXR_CONFIG")"
+          OCIO_CONFIG_DIR="$(dirname "$OCIO_CONFIG")"
+
+          IMATH_VERSION_FILE="$(
+            find "$OIIO_PREFIX" \
+              -name ImathConfigVersion.cmake -print -quit
+          )"
 
           {
             echo "LLVM_PREFIX=$LLVM_PREFIX"
             echo "OIIO_PREFIX=$OIIO_PREFIX"
-            echo "LLVM_CONFIG_DIR=$(dirname "$LLVM_CONFIG")"
-            echo "CLANG_CONFIG_DIR=$(dirname "$CLANG_CONFIG")"
-            echo "OIIO_CONFIG_DIR=$(dirname "$OIIO_CONFIG")"
+            echo "LLVM_CONFIG_DIR=$LLVM_CONFIG_DIR"
+            echo "CLANG_CONFIG_DIR=$CLANG_CONFIG_DIR"
+            echo "OIIO_CONFIG_DIR=$OIIO_CONFIG_DIR"
+            echo "IMATH_CONFIG_DIR=$IMATH_CONFIG_DIR"
+            echo "OPENEXR_CONFIG_DIR=$OPENEXR_CONFIG_DIR"
+            echo "OCIO_CONFIG_DIR=$OCIO_CONFIG_DIR"
+            echo "TIFF_LIBRARY=$TIFF_LIBRARY"
+            echo "TIFF_INCLUDE_DIR=$TIFF_INCLUDE_DIR"
+            echo "JPEG_LIBRARY=$JPEG_LIBRARY"
+            echo "JPEG_INCLUDE_DIR=$JPEG_INCLUDE_DIR"
+            echo "PNG_LIBRARY=$PNG_LIBRARY"
+            echo "PNG_INCLUDE_DIR=$PNG_INCLUDE_DIR"
+            echo "ZLIB_LIBRARY=$ZLIB_LIBRARY"
+            echo "ZLIB_INCLUDE_DIR=$ZLIB_INCLUDE_DIR"
             echo "OSL_PROBE_ROOT=$ROOT"
           } >> "$GITHUB_ENV"
 
           {
-            echo "LLVM_PREFIX=$LLVM_PREFIX"
-            echo "LLVM_CONFIG=$LLVM_CONFIG"
-            echo "CLANG_CONFIG=$CLANG_CONFIG"
-            echo "LLVM_ARCHIVE=$LLVM_LIB"
-            echo "OIIO_PREFIX=$OIIO_PREFIX"
-            echo "OIIO_CONFIG=$OIIO_CONFIG"
-            echo "OIIO_ARCHIVE=$OIIO_LIB"
+            echo "LLVM prefix: $LLVM_PREFIX"
+            echo "OIIO prefix: $OIIO_PREFIX"
+            echo "LLVM package: $LLVM_CONFIG"
+            echo "Clang package: $CLANG_CONFIG"
+            echo "OIIO package: $OIIO_CONFIG"
+            echo "Imath package: $IMATH_CONFIG"
+            echo "OpenEXR package: $OPENEXR_CONFIG"
+            echo "OpenColorIO package: $OCIO_CONFIG"
+            echo "TIFF library: $TIFF_LIBRARY"
+            echo "TIFF headers: $TIFF_INCLUDE_DIR"
+            echo "JPEG library: $JPEG_LIBRARY"
+            echo "JPEG headers: $JPEG_INCLUDE_DIR"
+            echo "PNG library: $PNG_LIBRARY"
+            echo "PNG headers: $PNG_INCLUDE_DIR"
+            echo "zlib library: $ZLIB_LIBRARY"
+            echo "zlib headers: $ZLIB_INCLUDE_DIR"
+            if [[ -n "$IMATH_VERSION_FILE" ]]; then
+              echo
+              echo "Imath version metadata: $IMATH_VERSION_FILE"
+              grep -E 'PACKAGE_VERSION|VERSION' "$IMATH_VERSION_FILE" || true
+            fi
           } | tee "$ROOT/logs/dependency-paths.txt"
 
-          find "$ROOT/deps" -type f \
-            \( -name '*Config.cmake' -o -name '*.pc' \) \
-            -print | sort \
-            > "$ROOT/logs/package-files.txt"
+      - name: Build missing Android pugixml dependency
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          ROOT="$OSL_PROBE_ROOT"
+          SRC="$ROOT/pugixml-source"
+          BUILD="$ROOT/pugixml-build"
+          PREFIX="$ROOT/deps/pugixml"
+
+          git clone \
+            --depth 1 \
+            --branch "$PUGIXML_VERSION" \
+            https://github.com/zeux/pugixml.git \
+            "$SRC"
+
+          git -C "$SRC" rev-parse HEAD \
+            | tee "$ROOT/logs/pugixml-source-commit.txt"
+
+          cmake \
+            -S "$SRC" \
+            -B "$BUILD" \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTS=OFF \
+            -DPUGIXML_BUILD_TESTS=OFF \
+            2>&1 | tee "$ROOT/logs/pugixml-configure.log"
+
+          cmake --build "$BUILD" --parallel 2 \
+            2>&1 | tee "$ROOT/logs/pugixml-build.log"
+
+          cmake --install "$BUILD" \
+            2>&1 | tee "$ROOT/logs/pugixml-install.log"
+
+          PUGI_CONFIG="$(
+            find "$PREFIX" \
+              \( -iname 'pugixml-config.cmake' \
+                 -o -iname 'pugixmlConfig.cmake' \) \
+              -print -quit
+          )"
+          PUGI_LIBRARY="$(
+            find "$PREFIX/lib" -name 'libpugixml.a' -print -quit
+          )"
+
+          test -n "$PUGI_CONFIG"
+          test -f "$PUGI_CONFIG"
+          test -n "$PUGI_LIBRARY"
+          test -f "$PUGI_LIBRARY"
+
+          MEMBER="$(ar t "$PUGI_LIBRARY" | sed -n '1p')"
+          test -n "$MEMBER"
+          OBJECT="$(mktemp)"
+          ar p "$PUGI_LIBRARY" "$MEMBER" > "$OBJECT"
+          readelf -h "$OBJECT" | tee "$ROOT/logs/pugixml-elf.txt"
+          readelf -h "$OBJECT" | grep -Eq 'Machine:.*AArch64'
+          rm -f "$OBJECT"
+
+          echo "PUGIXML_PREFIX=$PREFIX" >> "$GITHUB_ENV"
+          echo "PUGIXML_CONFIG_DIR=$(dirname "$PUGI_CONFIG")" \
+            >> "$GITHUB_ENV"
+
+          {
+            echo "Pugixml package: $PUGI_CONFIG"
+            echo "Pugixml library: $PUGI_LIBRARY"
+          } | tee "$ROOT/logs/pugixml-package-summary.txt"
 
       - name: Fetch exact OSL source
         shell: bash
@@ -227,26 +332,7 @@ jobs:
           PREFIX="$ROOT/install"
           LOG="$ROOT/logs/osl-target-configure.log"
 
-          mkdir -p "$BUILD" "$PREFIX" "$ROOT/logs"
-
-          PUGI_CONFIG="$(
-            find "$OIIO_PREFIX" -type f \
-              \( -iname 'pugixmlConfig.cmake' \
-                 -o -iname 'pugixml-config.cmake' \) \
-              -print -quit
-          )"
-
-          EXTRA_ARGS=()
-
-          if [[ -n "$PUGI_CONFIG" ]]; then
-            echo "Found pugixml package: $PUGI_CONFIG"
-            EXTRA_ARGS+=(
-              "-Dpugixml_DIR=$(dirname "$PUGI_CONFIG")"
-            )
-          else
-            echo "No pugixml CMake config found in the OIIO prefix."
-            echo "CMake will report whether this dependency is missing."
-          fi
+          mkdir -p "$BUILD" "$PREFIX"
 
           cmake \
             -S "$ROOT/source" \
@@ -257,15 +343,32 @@ jobs:
             -DANDROID_PLATFORM="android-${ANDROID_API}" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            "-DCMAKE_PREFIX_PATH=${OIIO_PREFIX};${LLVM_PREFIX}" \
+            "-DCMAKE_PREFIX_PATH=${PUGIXML_PREFIX};${OIIO_PREFIX};${LLVM_PREFIX}" \
             "-DLLVM_DIR=${LLVM_CONFIG_DIR}" \
             "-DClang_DIR=${CLANG_CONFIG_DIR}" \
             "-DOpenImageIO_DIR=${OIIO_CONFIG_DIR}" \
-            "-DImath_ROOT=${OIIO_PREFIX}" \
-            "-DOpenEXR_ROOT=${OIIO_PREFIX}" \
-            "-DZLIB_ROOT=${OIIO_PREFIX}" \
-            -DBUILD_TESTING=OFF \
+            "-DImath_DIR=${IMATH_CONFIG_DIR}" \
+            "-DOpenEXR_DIR=${OPENEXR_CONFIG_DIR}" \
+            "-DOpenColorIO_DIR=${OCIO_CONFIG_DIR}" \
+            "-Dpugixml_DIR=${PUGIXML_CONFIG_DIR}" \
+            "-DPUGIXML_HOME=${PUGIXML_PREFIX}" \
+            "-DTIFF_LIBRARY=${TIFF_LIBRARY}" \
+            "-DTIFF_LIBRARY_RELEASE=${TIFF_LIBRARY}" \
+            "-DTIFF_INCLUDE_DIR=${TIFF_INCLUDE_DIR}" \
+            "-DJPEG_LIBRARY=${JPEG_LIBRARY}" \
+            "-DJPEG_LIBRARY_RELEASE=${JPEG_LIBRARY}" \
+            "-DJPEG_INCLUDE_DIR=${JPEG_INCLUDE_DIR}" \
+            "-DPNG_LIBRARY=${PNG_LIBRARY}" \
+            "-DPNG_LIBRARY_RELEASE=${PNG_LIBRARY}" \
+            "-DPNG_PNG_INCLUDE_DIR=${PNG_INCLUDE_DIR}" \
+            "-DPNG_INCLUDE_DIR=${PNG_INCLUDE_DIR}" \
+            "-DZLIB_LIBRARY=${ZLIB_LIBRARY}" \
+            "-DZLIB_LIBRARY_RELEASE=${ZLIB_LIBRARY}" \
+            "-DZLIB_INCLUDE_DIR=${ZLIB_INCLUDE_DIR}" \
+            -DBUILD_MISSING_DEPS=OFF \
+            -DBUILD_ROBINMAP_FORCE=OFF \
             -DOSL_BUILD_TESTS=OFF \
             -DOSL_BUILD_PLUGINS=OFF \
             -DOSL_BUILD_SHADERS=OFF \
@@ -274,8 +377,6 @@ jobs:
             -DUSE_PYTHON=OFF \
             -DUSE_QT=OFF \
             -DINSTALL_DOCS=OFF \
-            -DBUILD_MISSING_DEPS=OFF \
-            "${EXTRA_ARGS[@]}" \
             2>&1 | tee "$LOG"
 
       - name: Validate OSL configure cache
@@ -284,24 +385,20 @@ jobs:
         run: |
           set -euxo pipefail
 
-          CACHE="$OSL_PROBE_ROOT/build/CMakeCache.txt"
+          ROOT="$OSL_PROBE_ROOT"
+          CACHE="$ROOT/build/CMakeCache.txt"
+          LOG="$ROOT/logs/osl-target-configure.log"
+
           test -f "$CACHE"
+          grep -F "CMAKE_SYSTEM_NAME:STRING=Android" "$CACHE"
 
           grep -E \
-            '^(CMAKE_SYSTEM_NAME|CMAKE_ANDROID_ARCH_ABI|CMAKE_INSTALL_PREFIX|LLVM_DIR|Clang_DIR|OpenImageIO_DIR|OSL_BUILD_TESTS|OSL_BUILD_SHADERS|USE_LLVM_BITCODE):' \
+            '^(LLVM_DIR|Clang_DIR|OpenImageIO_DIR|Imath_DIR|OpenEXR_DIR|OpenColorIO_DIR|pugixml_DIR|TIFF_LIBRARY|TIFF_LIBRARY_RELEASE|TIFF_INCLUDE_DIR|JPEG_LIBRARY|JPEG_INCLUDE_DIR|PNG_LIBRARY|PNG_PNG_INCLUDE_DIR|ZLIB_LIBRARY|ZLIB_INCLUDE_DIR|CMAKE_ANDROID_ARCH_ABI):' \
             "$CACHE" \
-            | tee "$OSL_PROBE_ROOT/logs/configure-cache-summary.txt"
+            | tee "$ROOT/logs/configure-cache-summary.txt"
 
-          grep -F \
-            "CMAKE_SYSTEM_NAME:STRING=Android" "$CACHE"
-
-          grep -F \
-            "OSL_BUILD_SHADERS:BOOL=OFF" "$CACHE"
-
-          grep -F \
-            "USE_LLVM_BITCODE:BOOL=OFF" "$CACHE"
-
-          echo "OSL Android configuration completed."
+          echo "OSL CMake configuration completed."
+          echo "This did not compile or install OSL."
 
       - name: Upload configure diagnostics
         if: always()
