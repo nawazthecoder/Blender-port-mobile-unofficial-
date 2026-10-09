@@ -26,7 +26,7 @@ jobs:
     env:
       ANDROID_API: '29'
       ANDROID_NDK_VERSION: '27.3.13750724'
-      ROOT: ${{ runner.temp }}/tiff-oiio-diagnostic
+      ROOT: tiff-oiio-diagnostic
 
     steps:
       - name: Check out repository
@@ -55,7 +55,7 @@ jobs:
           run-id: ${{ inputs.llvm_run_id }}
           github-token: ${{ github.token }}
           name: llvm-20.1.8-android-arm64
-          path: ${{ runner.temp }}/tiff-oiio-diagnostic/artifacts/llvm
+          path: ${{ github.workspace }}/tiff-oiio-diagnostic/artifacts/llvm
 
       - name: Download OpenImageIO Android ARM64 artifact
         uses: actions/download-artifact@v4
@@ -64,7 +64,7 @@ jobs:
           run-id: ${{ inputs.oiio_run_id }}
           github-token: ${{ github.token }}
           name: android-arm64-oiio
-          path: ${{ runner.temp }}/tiff-oiio-diagnostic/artifacts/oiio
+          path: ${{ github.workspace }}/tiff-oiio-diagnostic/artifacts/oiio
 
       - name: Prepare dependency prefixes and probe projects
         shell: bash
@@ -87,7 +87,7 @@ jobs:
           echo "=== First entries in OIIO archive ===" >> "$ROOT/logs/package-inventory.txt"
           tar -tzf "$OIIO_ARCHIVE" | sed -n '1,60p' >> "$ROOT/logs/package-inventory.txt"
 
-          # Extract without assuming whether the tarball has a top-level "prefix/" folder.
+          # Extract both dependency bundles.
           tar -xzf "$LLVM_ARCHIVE" -C "$ROOT/deps/llvm"
           tar -xzf "$OIIO_ARCHIVE" -C "$ROOT/deps/oiio"
 
@@ -100,8 +100,7 @@ jobs:
           test -n "$TIFF_LIB"
           test -n "$TIFF_HEADER"
 
-          # Derive prefixes from the actual discovered config paths. This avoids stale
-          # hard-coded hints into the older $GITHUB_WORKSPACE/android-oiio/prefix tree.
+          # Derive prefixes from the actual discovered configuration paths.
           LLVM_PREFIX="${LLVM_CONFIG%/lib/cmake/llvm/LLVMConfig.cmake}"
           OIIO_PREFIX="${OIIO_CONFIG%/lib/cmake/OpenImageIO/OpenImageIOConfig.cmake}"
           TIFF_INCLUDE_DIR="$(dirname "$TIFF_HEADER")"
@@ -212,7 +211,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: android-tiff-oiio-diagnostic-report
-          path: ${{ runner.temp }}/tiff-oiio-diagnostic/logs/
+          path: ${{ github.workspace }}/tiff-oiio-diagnostic/logs/
           if-no-files-found: error
           retention-days: 14
 
