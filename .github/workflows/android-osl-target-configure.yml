@@ -1,0 +1,318 @@
+name: Android OSL Target Configure Probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      llvm_run_id:
+        description: Successful LLVM ARM64 run ID
+        required: true
+        default: "37872328646"
+        type: string
+      oiio_run_id:
+        description: Successful OIIO ARM64 run ID
+        required: true
+        default: "37616185108"
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  ANDROID_API: "29"
+  ANDROID_NDK_VERSION: "27.3.13750724"
+  OSL_VERSION: "v1.15.3.0"
+
+jobs:
+  configure:
+    name: Configure OSL for Android ARM64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Install host tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake ninja-build git binutils \
+            python3 pkg-config
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ""
+
+      - name: Install Android NDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          sdkmanager \
+            --sdk_root="$ANDROID_SDK_ROOT" \
+            "platforms;android-${ANDROID_API}" \
+            "ndk;${ANDROID_NDK_VERSION}"
+
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}" \
+            >> "$GITHUB_ENV"
+
+      - name: Download existing Android LLVM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: llvm-20.1.8-android-arm64
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.llvm_run_id }}
+          github-token: ${{ github.token }}
+          path: artifacts/llvm
+
+      - name: Download existing Android OIIO artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: android-arm64-oiio
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.oiio_run_id }}
+          github-token: ${{ github.token }}
+          path: artifacts/oiio
+
+      - name: Extract and verify target dependency prefixes
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          ROOT="$GITHUB_WORKSPACE/android-osl-probe"
+          mkdir -p \
+            "$ROOT/deps/llvm" \
+            "$ROOT/deps/oiio" \
+            "$ROOT/logs"
+
+          LLVM_ARCHIVE="$(
+            find artifacts/llvm -type f \
+              -name 'llvm-20.1.8-android-arm64.tar.gz' \
+              -print -quit
+          )"
+
+          OIIO_ARCHIVE="$(
+            find artifacts/oiio -type f \
+              -name 'android-arm64-oiio-prefix.tar.gz' \
+              -print -quit
+          )"
+
+          test -n "$LLVM_ARCHIVE"
+          test -n "$OIIO_ARCHIVE"
+          test -f "$LLVM_ARCHIVE"
+          test -f "$OIIO_ARCHIVE"
+
+          echo "LLVM archive: $LLVM_ARCHIVE"
+          echo "OIIO archive: $OIIO_ARCHIVE"
+
+          tar -xzf "$LLVM_ARCHIVE" \
+            -C "$ROOT/deps/llvm"
+
+          tar -xzf "$OIIO_ARCHIVE" \
+            -C "$ROOT/deps/oiio"
+
+          LLVM_CONFIG="$(
+            find "$ROOT/deps/llvm" -type f \
+              -name LLVMConfig.cmake -print -quit
+          )"
+
+          CLANG_CONFIG="$(
+            find "$ROOT/deps/llvm" -type f \
+              -name ClangConfig.cmake -print -quit
+          )"
+
+          OIIO_CONFIG="$(
+            find "$ROOT/deps/oiio" -type f \
+              -name OpenImageIOConfig.cmake -print -quit
+          )"
+
+          test -n "$LLVM_CONFIG"
+          test -n "$CLANG_CONFIG"
+          test -n "$OIIO_CONFIG"
+
+          LLVM_PREFIX="$(
+            cd "$(dirname "$LLVM_CONFIG")/../../.." && pwd
+          )"
+
+          OIIO_PREFIX="$(
+            cd "$(dirname "$OIIO_CONFIG")/../../.." && pwd
+          )"
+
+          LLVM_LIB="$(
+            find "$LLVM_PREFIX/lib" -type f \
+              -name 'libLLVM*.a' -print -quit
+          )"
+
+          OIIO_LIB="$(
+            find "$OIIO_PREFIX/lib" -type f \
+              -name 'libOpenImageIO*.a' -print -quit
+          )"
+
+          test -n "$LLVM_LIB"
+          test -n "$OIIO_LIB"
+
+          verify_aarch64_archive() {
+            local archive="$1"
+            local member object header
+
+            member="$(ar t "$archive" | sed -n '1p')"
+            test -n "$member"
+
+            object="$(mktemp)"
+            header="$(mktemp)"
+
+            ar p "$archive" "$member" > "$object"
+            readelf -h "$object" > "$header"
+
+            if ! grep -Eq 'Machine:.*AArch64' "$header"; then
+              echo "::error::Not an AArch64 ELF object: $archive"
+              cat "$header"
+              rm -f "$object" "$header"
+              return 1
+            fi
+
+            echo "AArch64 verified: $archive"
+            rm -f "$object" "$header"
+          }
+
+          verify_aarch64_archive "$LLVM_LIB"
+          verify_aarch64_archive "$OIIO_LIB"
+
+          {
+            echo "LLVM_PREFIX=$LLVM_PREFIX"
+            echo "OIIO_PREFIX=$OIIO_PREFIX"
+            echo "LLVM_CONFIG_DIR=$(dirname "$LLVM_CONFIG")"
+            echo "CLANG_CONFIG_DIR=$(dirname "$CLANG_CONFIG")"
+            echo "OIIO_CONFIG_DIR=$(dirname "$OIIO_CONFIG")"
+            echo "OSL_PROBE_ROOT=$ROOT"
+          } >> "$GITHUB_ENV"
+
+          {
+            echo "LLVM_PREFIX=$LLVM_PREFIX"
+            echo "LLVM_CONFIG=$LLVM_CONFIG"
+            echo "CLANG_CONFIG=$CLANG_CONFIG"
+            echo "LLVM_ARCHIVE=$LLVM_LIB"
+            echo "OIIO_PREFIX=$OIIO_PREFIX"
+            echo "OIIO_CONFIG=$OIIO_CONFIG"
+            echo "OIIO_ARCHIVE=$OIIO_LIB"
+          } | tee "$ROOT/logs/dependency-paths.txt"
+
+          find "$ROOT/deps" -type f \
+            \( -name '*Config.cmake' -o -name '*.pc' \) \
+            -print | sort \
+            > "$ROOT/logs/package-files.txt"
+
+      - name: Fetch exact OSL source
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          git clone \
+            --depth 1 \
+            --branch "$OSL_VERSION" \
+            https://github.com/AcademySoftwareFoundation/OpenShadingLanguage.git \
+            "$OSL_PROBE_ROOT/source"
+
+          git -C "$OSL_PROBE_ROOT/source" rev-parse HEAD \
+            | tee "$OSL_PROBE_ROOT/logs/osl-source-commit.txt"
+
+      - name: Configure OSL for Android ARM64
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          ROOT="$OSL_PROBE_ROOT"
+          BUILD="$ROOT/build"
+          PREFIX="$ROOT/install"
+          LOG="$ROOT/logs/osl-target-configure.log"
+
+          mkdir -p "$BUILD" "$PREFIX" "$ROOT/logs"
+
+          PUGI_CONFIG="$(
+            find "$OIIO_PREFIX" -type f \
+              \( -iname 'pugixmlConfig.cmake' \
+                 -o -iname 'pugixml-config.cmake' \) \
+              -print -quit
+          )"
+
+          EXTRA_ARGS=()
+
+          if [[ -n "$PUGI_CONFIG" ]]; then
+            echo "Found pugixml package: $PUGI_CONFIG"
+            EXTRA_ARGS+=(
+              "-Dpugixml_DIR=$(dirname "$PUGI_CONFIG")"
+            )
+          else
+            echo "No pugixml CMake config found in the OIIO prefix."
+            echo "CMake will report whether this dependency is missing."
+          fi
+
+          cmake \
+            -S "$ROOT/source" \
+            -B "$BUILD" \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM="android-${ANDROID_API}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            "-DCMAKE_PREFIX_PATH=${OIIO_PREFIX};${LLVM_PREFIX}" \
+            "-DLLVM_DIR=${LLVM_CONFIG_DIR}" \
+            "-DClang_DIR=${CLANG_CONFIG_DIR}" \
+            "-DOpenImageIO_DIR=${OIIO_CONFIG_DIR}" \
+            "-DImath_ROOT=${OIIO_PREFIX}" \
+            "-DOpenEXR_ROOT=${OIIO_PREFIX}" \
+            "-DZLIB_ROOT=${OIIO_PREFIX}" \
+            -DBUILD_TESTING=OFF \
+            -DOSL_BUILD_TESTS=OFF \
+            -DOSL_BUILD_PLUGINS=OFF \
+            -DOSL_BUILD_SHADERS=OFF \
+            -DUSE_LLVM_BITCODE=OFF \
+            -DOSL_USE_OPTIX=OFF \
+            -DUSE_PYTHON=OFF \
+            -DUSE_QT=OFF \
+            -DINSTALL_DOCS=OFF \
+            -DBUILD_MISSING_DEPS=OFF \
+            "${EXTRA_ARGS[@]}" \
+            2>&1 | tee "$LOG"
+
+      - name: Validate OSL configure cache
+        if: success()
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          CACHE="$OSL_PROBE_ROOT/build/CMakeCache.txt"
+          test -f "$CACHE"
+
+          grep -E \
+            '^(CMAKE_SYSTEM_NAME|CMAKE_ANDROID_ARCH_ABI|CMAKE_INSTALL_PREFIX|LLVM_DIR|Clang_DIR|OpenImageIO_DIR|OSL_BUILD_TESTS|OSL_BUILD_SHADERS|USE_LLVM_BITCODE):' \
+            "$CACHE" \
+            | tee "$OSL_PROBE_ROOT/logs/configure-cache-summary.txt"
+
+          grep -F \
+            "CMAKE_SYSTEM_NAME:STRING=Android" "$CACHE"
+
+          grep -F \
+            "OSL_BUILD_SHADERS:BOOL=OFF" "$CACHE"
+
+          grep -F \
+            "USE_LLVM_BITCODE:BOOL=OFF" "$CACHE"
+
+          echo "OSL Android configuration completed."
+
+      - name: Upload configure diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-osl-target-configure-report
+          path: |
+            android-osl-probe/logs/
+            android-osl-probe/build/CMakeCache.txt
+            android-osl-probe/build/CMakeFiles/CMakeConfigureLog.yaml
+            android-osl-probe/build/CMakeFiles/CMakeError.log
+            android-osl-probe/build/CMakeFiles/CMakeOutput.log
+          if-no-files-found: warn
+          retention-days: 14
