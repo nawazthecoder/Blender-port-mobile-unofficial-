@@ -64,7 +64,6 @@ jobs:
           unzip -q "$NDK_ARCHIVE" -d "$RUNNER_TEMP"
 
           ANDROID_NDK_HOME="$RUNNER_TEMP/android-ndk-r27d"
-
           test -f "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
           test -x "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
 
@@ -107,7 +106,6 @@ jobs:
             "$ROOT/build-oiio"
 
           LLVM_ARCHIVE="$(find "$ROOT/artifacts/llvm" -type f -name '*.tar.gz' -print -quit || true)"
-
           test -n "$LLVM_ARCHIVE" || {
             echo "ERROR: No LLVM tar.gz archive found." >&2
             find "$ROOT/artifacts/llvm" -maxdepth 4 -type f -print >&2 || true
@@ -135,9 +133,9 @@ jobs:
             cp -a "$ROOT/artifacts/oiio/prefix/." "$ROOT/deps/oiio/"
           else
             OIIO_CONFIG_SOURCE="$(find "$ROOT/artifacts/oiio" -type f -name OpenImageIOConfig.cmake -print -quit || true)"
-
             if [ -n "$OIIO_CONFIG_SOURCE" ]; then
               OIIO_PREFIX_SOURCE="${OIIO_CONFIG_SOURCE%/lib/cmake/OpenImageIO/OpenImageIOConfig.cmake}"
+              test -d "$OIIO_PREFIX_SOURCE"
               cp -a "$OIIO_PREFIX_SOURCE/." "$ROOT/deps/oiio/"
             else
               echo "ERROR: OpenImageIOConfig.cmake was not found." >&2
@@ -154,17 +152,14 @@ jobs:
             echo "ERROR: LLVMConfig.cmake was not found." >&2
             exit 1
           }
-
           test -n "$OIIO_CONFIG" || {
             echo "ERROR: OpenImageIOConfig.cmake was not found." >&2
             exit 1
           }
-
           test -n "$TIFF_LIB" || {
             echo "ERROR: libtiff.a was not found." >&2
             exit 1
           }
-
           test -n "$TIFF_HEADER" || {
             echo "ERROR: tiffio.h was not found." >&2
             exit 1
@@ -186,6 +181,9 @@ jobs:
             find "$OIIO_PREFIX" -type f \
               \( -name '*Config.cmake' -o -name '*-config.cmake' \) \
               -print | sort
+            echo
+            echo "=== OpenJPH-related files ==="
+            find "$OIIO_PREFIX" \( -iname '*openjph*' -o -iname '*ojph*' \) -print | sort || true
           } | tee -a "$ROOT/logs/package-inventory.txt"
 
           {
@@ -202,7 +200,6 @@ jobs:
           project(TiffPackageProbe LANGUAGES C CXX)
 
           set(DEP_PREFIX "" CACHE PATH "Android dependency prefix")
-
           if(NOT IS_DIRECTORY "${DEP_PREFIX}/include")
             message(FATAL_ERROR "DEP_PREFIX is invalid: ${DEP_PREFIX}")
           endif()
@@ -223,8 +220,7 @@ jobs:
 
           if(NOT TARGET CMath::CMath)
             add_library(CMath::CMath INTERFACE IMPORTED)
-            set_property(TARGET CMath::CMath
-              PROPERTY INTERFACE_LINK_LIBRARIES m)
+            set_property(TARGET CMath::CMath PROPERTY INTERFACE_LINK_LIBRARIES m)
           endif()
 
           foreach(_required_file
@@ -238,7 +234,6 @@ jobs:
           endforeach()
 
           find_package(TIFF MODULE REQUIRED)
-
           message(STATUS "TIFF_FOUND=${TIFF_FOUND}")
           message(STATUS "TIFF_VERSION_STRING=${TIFF_VERSION_STRING}")
           message(STATUS "TIFF_LIBRARIES=${TIFF_LIBRARIES}")
@@ -265,10 +260,19 @@ jobs:
           project(OpenImageIOPackageProbe LANGUAGES C CXX)
 
           set(DEP_PREFIX "" CACHE PATH "Android dependency prefix")
-
           if(NOT IS_DIRECTORY "${DEP_PREFIX}/include")
             message(FATAL_ERROR "DEP_PREFIX is invalid: ${DEP_PREFIX}")
           endif()
+
+          foreach(_required_file
+              "${DEP_PREFIX}/lib/libz.a"
+              "${DEP_PREFIX}/lib/libjpeg.a"
+              "${DEP_PREFIX}/lib/libtiff.a"
+              "${DEP_PREFIX}/include/tiffio.h")
+            if(NOT EXISTS "${_required_file}")
+              message(FATAL_ERROR "Missing dependency: ${_required_file}")
+            endif()
+          endforeach()
 
           if(NOT TARGET ZLIB::ZLIB)
             add_library(ZLIB::ZLIB STATIC IMPORTED)
@@ -286,51 +290,57 @@ jobs:
 
           if(NOT TARGET CMath::CMath)
             add_library(CMath::CMath INTERFACE IMPORTED)
-            set_property(TARGET CMath::CMath
-              PROPERTY INTERFACE_LINK_LIBRARIES m)
+            set_property(TARGET CMath::CMath PROPERTY INTERFACE_LINK_LIBRARIES m)
           endif()
 
-          foreach(_required_file
-              "${DEP_PREFIX}/lib/libz.a"
-              "${DEP_PREFIX}/lib/libjpeg.a"
-              "${DEP_PREFIX}/lib/libtiff.a"
-              "${DEP_PREFIX}/include/tiffio.h")
-            if(NOT EXISTS "${_required_file}")
-              message(FATAL_ERROR "Missing dependency: ${_required_file}")
-            endif()
-          endforeach()
-
-          # Load TIFF and its dependencies first.
           find_package(TIFF MODULE REQUIRED)
-
-          # FIX: Load the exported Imath and OpenEXR targets explicitly.
-          # Setting *_DIR only specifies where CMake should look.
           find_package(Imath CONFIG REQUIRED)
+
+          # OpenEXR may reference an external target named "openjph".
+          # Prefer a real installed OpenJPH archive or shared library.
+          if(NOT TARGET openjph)
+            file(GLOB _openjph_archives
+              "${DEP_PREFIX}/lib/libopenjph*.a"
+              "${DEP_PREFIX}/lib/libOpenJPH*.a"
+              "${DEP_PREFIX}/lib/libOpenJPH*.so"
+              "${DEP_PREFIX}/lib/libopenjph*.so")
+
+            if(_openjph_archives)
+              list(GET _openjph_archives 0 _openjph_library)
+              add_library(openjph UNKNOWN IMPORTED GLOBAL)
+              set_target_properties(openjph PROPERTIES
+                IMPORTED_LOCATION "${_openjph_library}")
+              message(STATUS "Using OpenJPH library: ${_openjph_library}")
+            else()
+              add_library(openjph INTERFACE IMPORTED GLOBAL)
+              message(WARNING
+                "No separate OpenJPH library was packaged. Using a temporary "
+                "interface target for configuration; the build/link test will "
+                "determine whether the installed OpenEXR libraries need it.")
+            endif()
+          endif()
+
           find_package(OpenEXR CONFIG REQUIRED)
 
           if(NOT TARGET Imath::Imath)
             message(FATAL_ERROR "Imath::Imath target was not created")
           endif()
-
           if(NOT TARGET OpenEXR::OpenEXR)
             message(FATAL_ERROR "OpenEXR::OpenEXR target was not created")
           endif()
 
-          # OpenImageIO's exported target references OpenEXR::OpenEXR.
           find_package(OpenImageIO CONFIG REQUIRED)
-
           message(STATUS "OpenImageIO_FOUND=${OpenImageIO_FOUND}")
           message(STATUS "OpenImageIO_VERSION=${OpenImageIO_VERSION}")
 
           if(TARGET OpenImageIO::OpenImageIO)
             add_executable(oiio_package_probe main.cpp)
-            target_link_libraries(
-              oiio_package_probe PRIVATE OpenImageIO::OpenImageIO)
+            target_link_libraries(oiio_package_probe PRIVATE OpenImageIO::OpenImageIO)
           elseif(TARGET OpenImageIO)
             add_executable(oiio_package_probe main.cpp)
             target_link_libraries(oiio_package_probe PRIVATE OpenImageIO)
           else()
-            message(FATAL_ERROR "OpenImageIO library target was not created")
+            message(FATAL_ERROR "OpenImageIO package was found but no library target exists")
           endif()
           CMAKE
 
@@ -374,7 +384,6 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-
           cmake --build "$ROOT/build-tiff" --parallel 2 \
             2>&1 | tee "$ROOT/logs/probe-tiff-build.log"
 
@@ -414,7 +423,6 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-
           cmake --build "$ROOT/build-oiio" --parallel 2 \
             2>&1 | tee "$ROOT/logs/probe-oiio-build.log"
 
@@ -424,7 +432,6 @@ jobs:
         run: |
           set -u
           mkdir -p "$ROOT/logs"
-
           {
             echo "Android TIFF and OpenImageIO package diagnostic"
             echo "LLVM workflow run ID: ${{ inputs.llvm_run_id }}"
