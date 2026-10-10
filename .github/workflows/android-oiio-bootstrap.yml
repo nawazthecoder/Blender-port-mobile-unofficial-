@@ -6,959 +6,475 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: android-arm64-oiio-bootstrap-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   ANDROID_API: "29"
   ANDROID_NDK_VERSION: "27.3.13750724"
-
-  # Blender 5.2.2 dependency versions
   OIIO_VERSION: "v3.1.13.1"
   IMATH_VERSION: "v3.2.2"
   OPENEXR_VERSION: "v3.4.10"
   OPENCOLORIO_VERSION: "v2.5.0"
-
   FMT_VERSION: "12.1.0"
   ROBINMAP_VERSION: "v1.3.0"
   PYSTRING_VERSION: "v1.1.4"
-
   ZLIB_VERSION: "v1.3.1"
   PNG_VERSION: "v1.6.50"
   JPEG_VERSION: "3.1.0"
   TIFF_VERSION: "v4.7.1"
-
   CMAKE_BUILD_PARALLEL_LEVEL: "2"
 
 jobs:
   build-oiio:
+    name: Build Android ARM64 image dependencies
     runs-on: ubuntu-24.04
     timeout-minutes: 360
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - name: Check out repository
+        uses: actions/checkout@v4
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
-        with:
-          packages: ""
+      - name: Install Android SDK tools and NDK
+        uses: android-actions/setup-android@v3
 
-      - name: Install host tools
+      - name: Install build tools
         shell: bash
         run: |
           set -euxo pipefail
-
           sudo apt-get update
-
-          sudo apt-get install -y \
-            cmake \
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            git \
             ninja-build \
-            curl \
+            pkg-config \
+            python3 \
             unzip \
-            xz-utils \
-            file \
-            binutils \
-            pkg-config
+            zip
 
-      - name: Install Android NDK
+          sdkmanager --install "ndk;${ANDROID_NDK_VERSION}"
+
+          test -x "$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+
+          cmake --version
+          ninja --version
+
+      - name: Prepare build folders and shared CMake helper
         shell: bash
         run: |
           set -euxo pipefail
 
-          sdkmanager \
-            --sdk_root="$ANDROID_SDK_ROOT" \
-            "platform-tools" \
-            "platforms;android-${ANDROID_API}" \
-            "ndk;${ANDROID_NDK_VERSION}"
+          ROOT="$GITHUB_WORKSPACE/android-oiio"
+          SRC="$ROOT/src"
+          BUILD="$ROOT/build"
+          PREFIX="$ROOT/prefix"
+          LOGS="$ROOT/logs"
+          TOOLCHAIN="$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}/build/cmake/android.toolchain.cmake"
+          ANDROID_NDK_HOME="$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}"
 
-          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}" \
-            >> "$GITHUB_ENV"
+          mkdir -p "$SRC" "$BUILD" "$PREFIX" "$LOGS"
+          test -f "$TOOLCHAIN"
 
-      - name: Prepare directories
+          {
+            echo "OIIO_ROOT=$ROOT"
+            echo "OIIO_SRC=$SRC"
+            echo "OIIO_BUILD=$BUILD"
+            echo "OIIO_PREFIX=$PREFIX"
+            echo "OIIO_LOGS=$LOGS"
+            echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+            echo "ANDROID_TOOLCHAIN_FILE=$TOOLCHAIN"
+          } >> "$GITHUB_ENV"
+
+          cat > "$ROOT/common.sh" <<'BASH'
+          set -Eeuo pipefail
+
+          COMMON_CMAKE_ARGS=(
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_TOOLCHAIN_FILE"
+            -DANDROID_ABI=arm64-v8a
+            -DANDROID_PLATFORM="android-${ANDROID_API}"
+            -DANDROID_STL=c++_static
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
+            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_INSTALL_PREFIX="$OIIO_PREFIX"
+            -DCMAKE_INSTALL_LIBDIR=lib
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+            -DCMAKE_PREFIX_PATH="$OIIO_PREFIX"
+            -DCMAKE_FIND_ROOT_PATH="$OIIO_PREFIX"
+            -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER
+            -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY
+            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY
+            -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
+          )
+
+          run_cmake_project() {
+            local name="$1"
+            local source="$2"
+            shift 2
+            local build_dir="$OIIO_BUILD/$name"
+
+            test -d "$source"
+            rm -rf "$build_dir"
+
+            cmake -S "$source" -B "$build_dir" -G Ninja \
+              "${COMMON_CMAKE_ARGS[@]}" \
+              -DBUILD_SHARED_LIBS=OFF \
+              "$@" \
+              2>&1 | tee "$OIIO_LOGS/${name}-configure.log"
+
+            cmake --build "$build_dir" --parallel 2 \
+              2>&1 | tee "$OIIO_LOGS/${name}-build.log"
+
+            cmake --install "$build_dir" \
+              2>&1 | tee "$OIIO_LOGS/${name}-install.log"
+          }
+          BASH
+
+      - name: Download pinned dependency sources
         shell: bash
         run: |
           set -euxo pipefail
 
-          rm -rf android-oiio
+          clone_tag() {
+            local url="$1"
+            local tag="$2"
+            local dest="$3"
 
-          mkdir -p \
-            android-oiio/src \
-            android-oiio/build \
-            android-oiio/prefix \
-            android-oiio/logs \
-            android-oiio/package
+            if [ -d "$dest/.git" ]; then
+              git -C "$dest" fetch --depth 1 origin "$tag"
+              git -C "$dest" checkout --detach FETCH_HEAD
+            else
+              git clone --depth 1 --branch "$tag" "$url" "$dest"
+            fi
+          }
 
-          echo "SRC=$GITHUB_WORKSPACE/android-oiio/src" \
-            >> "$GITHUB_ENV"
+          clone_tag https://github.com/madler/zlib.git \
+            "$ZLIB_VERSION" "$OIIO_SRC/zlib"
 
-          echo "BUILD=$GITHUB_WORKSPACE/android-oiio/build" \
-            >> "$GITHUB_ENV"
+          clone_tag https://github.com/AcademySoftwareFoundation/Imath.git \
+            "$IMATH_VERSION" "$OIIO_SRC/imath"
 
-          echo "PREFIX=$GITHUB_WORKSPACE/android-oiio/prefix" \
-            >> "$GITHUB_ENV"
+          clone_tag https://github.com/AcademySoftwareFoundation/openexr.git \
+            "$OPENEXR_VERSION" "$OIIO_SRC/openexr"
 
-          echo "LOGS=$GITHUB_WORKSPACE/android-oiio/logs" \
-            >> "$GITHUB_ENV"
+          clone_tag https://github.com/AcademySoftwareFoundation/OpenColorIO.git \
+            "$OPENCOLORIO_VERSION" "$OIIO_SRC/opencolorio"
 
-          echo "TOOLCHAIN=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
-            >> "$GITHUB_ENV"
+          clone_tag https://github.com/AcademySoftwareFoundation/OpenImageIO.git \
+            "$OIIO_VERSION" "$OIIO_SRC/OpenImageIO"
 
-      - name: Download dependencies
+          clone_tag https://github.com/fmtlib/fmt.git \
+            "$FMT_VERSION" "$OIIO_SRC/fmt"
+
+          clone_tag https://github.com/Tessil/robin-map.git \
+            "$ROBINMAP_VERSION" "$OIIO_SRC/robin-map"
+
+          clone_tag https://github.com/imageworks/pystring.git \
+            "$PYSTRING_VERSION" "$OIIO_SRC/pystring"
+
+          clone_tag https://github.com/pnggroup/libpng.git \
+            "$PNG_VERSION" "$OIIO_SRC/libpng"
+
+          clone_tag https://github.com/libjpeg-turbo/libjpeg-turbo.git \
+            "$JPEG_VERSION" "$OIIO_SRC/libjpeg-turbo"
+
+          clone_tag https://gitlab.com/libtiff/libtiff.git \
+            "$TIFF_VERSION" "$OIIO_SRC/libtiff"
+
+          printf 'OIIO=%s\nIMATH=%s\nOPENEXR=%s\nOCIO=%s\nFMT=%s\nROBINMAP=%s\nPYSTRING=%s\nZLIB=%s\nPNG=%s\nJPEG=%s\nTIFF=%s\n' \
+            "$OIIO_VERSION" \
+            "$IMATH_VERSION" \
+            "$OPENEXR_VERSION" \
+            "$OPENCOLORIO_VERSION" \
+            "$FMT_VERSION" \
+            "$ROBINMAP_VERSION" \
+            "$PYSTRING_VERSION" \
+            "$ZLIB_VERSION" \
+            "$PNG_VERSION" \
+            "$JPEG_VERSION" \
+            "$TIFF_VERSION" \
+            | tee "$OIIO_LOGS/source-versions.txt"
+
+      - name: Build Android zlib, Imath, fmt, robin-map, and pystring
         shell: bash
         run: |
           set -euxo pipefail
+          source "$OIIO_ROOT/common.sh"
 
-          cd "$SRC"
+          run_cmake_project zlib "$OIIO_SRC/zlib" \
+            -DZLIB_BUILD_EXAMPLES=OFF
 
-          git clone --depth 1 --branch "$IMATH_VERSION" \
-            https://github.com/AcademySoftwareFoundation/Imath.git \
-            imath
+          run_cmake_project imath "$OIIO_SRC/imath" \
+            -DBUILD_TESTING=OFF \
+            -DIMATH_BUILD_TESTS=OFF \
+            -DIMATH_INSTALL_PKG_CONFIG=OFF
 
-          git clone --depth 1 --branch "$OPENEXR_VERSION" \
-            https://github.com/AcademySoftwareFoundation/openexr.git \
-            openexr
+          run_cmake_project fmt "$OIIO_SRC/fmt" \
+            -DFMT_TEST=OFF \
+            -DFMT_DOC=OFF \
+            -DFMT_INSTALL=ON
 
-          git clone --depth 1 --branch "$OIIO_VERSION" \
-            https://github.com/AcademySoftwareFoundation/OpenImageIO.git \
-            OpenImageIO
+          # robin-map is header-only. Install its headers into the common prefix.
+          test -f "$OIIO_SRC/robin-map/include/tsl/robin_map.h"
+          mkdir -p "$OIIO_PREFIX/include/tsl"
+          cp -a "$OIIO_SRC/robin-map/include/tsl/." \
+            "$OIIO_PREFIX/include/tsl/"
 
-          git clone --depth 1 --branch "$OPENCOLORIO_VERSION" \
-            https://github.com/AcademySoftwareFoundation/OpenColorIO.git \
-            opencolorio
+          # Fix pystring 1.1.4: install pystring.h and build a static PIC library.
+          test -f "$OIIO_SRC/pystring/pystring.cpp"
+          test -f "$OIIO_SRC/pystring/pystring.h"
 
-          git clone --depth 1 --branch "$FMT_VERSION" \
-            https://github.com/fmtlib/fmt.git \
-            fmt
+          cat > "$OIIO_SRC/pystring/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.10)
+          project(pystring LANGUAGES CXX)
 
-          git clone --depth 1 --branch "$ROBINMAP_VERSION" \
-            https://github.com/Tessil/robin-map.git \
-            robinmap
+          add_library(pystring STATIC pystring.cpp)
 
-          git clone --depth 1 --branch "$PYSTRING_VERSION" \
-            https://github.com/imageworks/pystring.git \
-            pystring
+          set_target_properties(pystring PROPERTIES
+            POSITION_INDEPENDENT_CODE ON
+            PUBLIC_HEADER pystring.h
+          )
 
-          git clone --depth 1 --branch "$ZLIB_VERSION" \
-            https://github.com/madler/zlib.git \
-            zlib
+          install(TARGETS pystring
+            ARCHIVE DESTINATION lib
+            PUBLIC_HEADER DESTINATION include
+          )
+          CMAKE
 
-          git clone --depth 1 --branch "$PNG_VERSION" \
-            https://github.com/pnggroup/libpng.git \
-            png
+          run_cmake_project pystring "$OIIO_SRC/pystring"
 
-          git clone --depth 1 --branch "$JPEG_VERSION" \
-            https://github.com/libjpeg-turbo/libjpeg-turbo.git \
-            jpeg
+          test -s "$OIIO_PREFIX/include/pystring.h"
+          test -s "$OIIO_PREFIX/lib/libpystring.a"
 
-          git clone --depth 1 --branch "$TIFF_VERSION" \
-            https://gitlab.com/libtiff/libtiff.git \
-            tiff
+          ar t "$OIIO_PREFIX/lib/libpystring.a" \
+            | tee "$OIIO_LOGS/pystring-archive-members.txt"
 
-      - name: Show source revisions
-        shell: bash
-        run: |
-          set -eux
+          {
+            echo "PYSTRING_INCLUDE_DIR=$OIIO_PREFIX/include"
+            echo "PYSTRING_LIBRARY=$OIIO_PREFIX/lib/libpystring.a"
+          } >> "$GITHUB_ENV"
 
-          cd "$SRC"
-
-          for d in \
-            imath \
-            openexr \
-            OpenImageIO \
-            opencolorio \
-            fmt \
-            robinmap \
-            pystring \
-            zlib \
-            png \
-            jpeg \
-            tiff
-          do
-            echo
-            echo "========== $d =========="
-            git -C "$d" rev-parse HEAD
-            git -C "$d" describe --tags --always || true
-          done
-
-      - name: Build zlib
+      - name: Build Android JPEG, PNG, TIFF, and OpenEXR
         shell: bash
         run: |
           set -euxo pipefail
+          source "$OIIO_ROOT/common.sh"
 
-          cmake \
-            -S "$SRC/zlib" \
-            -B "$BUILD/zlib" \
-            -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM="android-${ANDROID_API}" \
-            -DANDROID_STL=c++_static \
-            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DZLIB_BUILD_TESTING=OFF \
-            2>&1 | tee "$LOGS/zlib-configure.log"
+          run_cmake_project libjpeg-turbo "$OIIO_SRC/libjpeg-turbo" \
+            -DENABLE_SHARED=OFF \
+            -DENABLE_STATIC=ON \
+            -DWITH_SIMD=OFF \
+            -DWITH_TURBOJPEG=OFF \
+            -DWITH_TESTS=OFF \
+            -DWITH_TOOLS=OFF
 
-          cmake --build "$BUILD/zlib" \
-            --target install \
-            2>&1 | tee "$LOGS/zlib-build.log"
-
-      - name: Build libpng
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          cmake \
-            -S "$SRC/png" \
-            -B "$BUILD/png" \
-            -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM="android-${ANDROID_API}" \
-            -DANDROID_STL=c++_static \
-            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+          run_cmake_project libpng "$OIIO_SRC/libpng" \
             -DPNG_SHARED=OFF \
             -DPNG_STATIC=ON \
             -DPNG_TESTS=OFF \
-            -DPNG_TOOLS=OFF \
-            2>&1 | tee "$LOGS/png-configure.log"
+            -DZLIB_ROOT="$OIIO_PREFIX" \
+            -DZLIB_LIBRARY="$OIIO_PREFIX/lib/libz.a" \
+            -DZLIB_INCLUDE_DIR="$OIIO_PREFIX/include"
 
-          cmake --build "$BUILD/png" \
-            --target install \
-            2>&1 | tee "$LOGS/png-build.log"
+          # Upstream libpng names its Unix static archive libpng16.a.
+          # Provide libpng.a as well for dependency find modules that expect it.
+          test -s "$OIIO_PREFIX/lib/libpng16.a"
+          ln -sf libpng16.a "$OIIO_PREFIX/lib/libpng.a"
 
-      - name: Build libjpeg-turbo
-        shell: bash
-        run: |
-          set -euxo pipefail
+          if [ ! -f "$OIIO_PREFIX/include/png.h" ]; then
+            cp "$OIIO_SRC/libpng/png.h" \
+              "$OIIO_SRC/libpng/pngconf.h" \
+              "$OIIO_PREFIX/include/"
+          fi
 
-          cmake \
-            -S "$SRC/jpeg" \
-            -B "$BUILD/jpeg" \
-            -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM="android-${ANDROID_API}" \
-            -DANDROID_STL=c++_static \
-            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DENABLE_SHARED=OFF \
-            -DENABLE_STATIC=ON \
-            -DWITH_TURBOJPEG=OFF \
-            -DWITH_TEST=OFF \
-            2>&1 | tee "$LOGS/jpeg-configure.log"
+          if [ ! -f "$OIIO_PREFIX/include/pnglibconf.h" ]; then
+            test -f "$OIIO_BUILD/libpng/pnglibconf.h"
+            cp "$OIIO_BUILD/libpng/pnglibconf.h" \
+              "$OIIO_PREFIX/include/pnglibconf.h"
+          fi
 
-          cmake --build "$BUILD/jpeg" \
-            --target install \
-            2>&1 | tee "$LOGS/jpeg-build.log"
-
-      - name: Build libtiff
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          cmake \
-            -S "$SRC/tiff" \
-            -B "$BUILD/tiff" \
-            -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM="android-${ANDROID_API}" \
-            -DANDROID_STL=c++_static \
-            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_PREFIX_PATH="$PREFIX" \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DBUILD_SHARED_LIBS=OFF \
+          run_cmake_project libtiff "$OIIO_SRC/libtiff" \
+            -DBUILD_TESTING=OFF \
             -Dtiff-tools=OFF \
             -Dtiff-tests=OFF \
             -Dtiff-contrib=OFF \
-            -Djbig=OFF \
-            -Djpeg=ON \
-            -Dwebp=OFF \
+            -Dtiff-docs=OFF \
             -Dzstd=OFF \
+            -Dwebp=OFF \
             -Dlzma=OFF \
-            -DLERC=OFF \
-            2>&1 | tee "$LOGS/tiff-configure.log"
+            -Dlibdeflate=OFF \
+            -Djpeg=ON \
+            -Dpng=ON \
+            -Dzlib=ON \
+            -DJPEG_LIBRARY="$OIIO_PREFIX/lib/libjpeg.a" \
+            -DJPEG_INCLUDE_DIR="$OIIO_PREFIX/include" \
+            -DPNG_LIBRARY="$OIIO_PREFIX/lib/libpng.a" \
+            -DPNG_PNG_INCLUDE_DIR="$OIIO_PREFIX/include" \
+            -DZLIB_LIBRARY="$OIIO_PREFIX/lib/libz.a" \
+            -DZLIB_INCLUDE_DIR="$OIIO_PREFIX/include"
 
-          cmake --build "$BUILD/tiff" \
-            --target install \
-            2>&1 | tee "$LOGS/tiff-build.log"
+          run_cmake_project openexr "$OIIO_SRC/openexr" \
+            -DBUILD_TESTING=OFF \
+            -DOPENEXR_BUILD_TOOLS=OFF \
+            -DOPENEXR_BUILD_EXAMPLES=OFF \
+            -DOPENEXR_BUILD_TESTS=OFF \
+            -DOPENEXR_INSTALL=ON \
+            -DImath_DIR="$OIIO_PREFIX/lib/cmake/Imath" \
+            -DZLIB_LIBRARY="$OIIO_PREFIX/lib/libz.a" \
+            -DZLIB_INCLUDE_DIR="$OIIO_PREFIX/include"
 
-      - name: Build Imath
+      - name: Build Android OpenColorIO
         shell: bash
         run: |
           set -euxo pipefail
+          source "$OIIO_ROOT/common.sh"
 
-          cmake \
-            -S "$SRC/imath" \
-            -B "$BUILD/imath" \
-            -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM="android-${ANDROID_API}" \
-            -DANDROID_STL=c++_static \
-            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+          run_cmake_project opencolorio "$OIIO_SRC/opencolorio" \
             -DBUILD_SHARED_LIBS=OFF \
-            -DIMATH_BUILD_TESTS=OFF \
-            -DIMATH_INSTALL_PKG_CONFIG=OFF \
-            2>&1 | tee "$LOGS/imath-configure.log"
-
-          cmake --build "$BUILD/imath" \
-            --target install \
-            2>&1 | tee "$LOGS/imath-build.log"
-
-      - name: Configure OpenEXR
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          rm -rf "$BUILD/openexr"
-
-          cmake \
-            -S "$SRC/openexr" \
-            -B "$BUILD/openexr" \
-            -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM="android-${ANDROID_API}" \
-            -DANDROID_STL=c++_static \
-            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_STANDARD=17 \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_PREFIX_PATH="$PREFIX" \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DBUILD_TESTING:BOOL=OFF \
-            -DOPENEXR_TEST_LIBRARIES:BOOL=OFF \
-            -DOPENEXR_TEST_TOOLS:BOOL=OFF \
-            -DOPENEXR_TEST_PYTHON:BOOL=OFF \
-            -DOPENEXR_INSTALL:BOOL=ON \
-            -DOPENEXR_BUILD_LIBS:BOOL=ON \
-            -DOPENEXR_BUILD_TOOLS:BOOL=OFF \
-            -DOPENEXR_INSTALL_TOOLS:BOOL=OFF \
-            -DOPENEXR_INSTALL_DEVELOPER_TOOLS:BOOL=OFF \
-            -DOPENEXR_BUILD_EXAMPLES:BOOL=OFF \
-            -DOPENEXR_BUILD_PYTHON:BOOL=OFF \
-            -DOPENEXR_BUILD_OSS_FUZZ:BOOL=OFF \
-            -DOPENEXR_FORCE_INTERNAL_DEFLATE:BOOL=ON \
-            -DOPENEXR_FORCE_INTERNAL_OPENJPH:BOOL=ON \
-            -DOPENEXR_FORCE_INTERNAL_IMATH:BOOL=OFF \
-            -DOPENEXR_ENABLE_THREADING:BOOL=ON \
-            -DOPENEXR_USE_TBB:BOOL=OFF \
-            -DImath_DIR="$PREFIX/lib/cmake/Imath" \
-            2>&1 | tee "$LOGS/openexr-configure.log"
-
-          echo
-          echo "========== OpenEXR test configuration =========="
-
-          grep -E \
-            '^(BUILD_TESTING|OPENEXR_TEST_LIBRARIES|OPENEXR_TEST_TOOLS|OPENEXR_TEST_PYTHON):' \
-            "$BUILD/openexr/CMakeCache.txt" || true
-
-          if grep -q '^BUILD_TESTING:.*=ON$' \
-              "$BUILD/openexr/CMakeCache.txt"; then
-            echo "ERROR: BUILD_TESTING is ON"
-            exit 1
-          fi
-
-          if grep -q '^OPENEXR_TEST_LIBRARIES:.*=ON$' \
-              "$BUILD/openexr/CMakeCache.txt"; then
-            echo "ERROR: OPENEXR_TEST_LIBRARIES is ON"
-            exit 1
-          fi
-
-          if grep -q '^OPENEXR_TEST_TOOLS:.*=ON$' \
-              "$BUILD/openexr/CMakeCache.txt"; then
-            echo "ERROR: OPENEXR_TEST_TOOLS is ON"
-            exit 1
-          fi
-
-          if grep -q '^OPENEXR_TEST_PYTHON:.*=ON$' \
-              "$BUILD/openexr/CMakeCache.txt"; then
-            echo "ERROR: OPENEXR_TEST_PYTHON is ON"
-            exit 1
-          fi
-
-      - name: Build OpenEXR libraries
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          cmake --build "$BUILD/openexr" \
-            --target \
-              Iex \
-              IlmThread \
-              OpenEXRCore \
-              OpenEXR \
-              OpenEXRUtil \
-            -j 2 \
-            2>&1 | tee "$LOGS/openexr-build.log"
-
-      - name: Install OpenEXR
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          cmake \
-            --install "$BUILD/openexr" \
-            2>&1 | tee "$LOGS/openexr-install.log"
-
-      - name: Verify OpenEXR test tree
-        shell: bash
-        run: |
-          set -eux
-
-          TEST_FILE="$(
-            find "$BUILD/openexr" \
-              -path '*/src/test/*' \
-              -type f \
-              -print \
-              -quit
-          )"
-
-          if [ -n "$TEST_FILE" ]; then
-            echo "ERROR: OpenEXR test files were generated:"
-            echo "$TEST_FILE"
-            exit 1
-          fi
-
-          echo "OpenEXR test tree was not generated."
-
-      - name: Build fmt
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          cmake \
-            -S "$SRC/fmt" \
-            -B "$BUILD/fmt" \
-            -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM="android-${ANDROID_API}" \
-            -DANDROID_STL=c++_static \
-            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DFMT_TEST=OFF \
-            -DFMT_DOC=OFF \
-            2>&1 | tee "$LOGS/fmt-configure.log"
-
-          cmake --build "$BUILD/fmt" \
-            --target install \
-            2>&1 | tee "$LOGS/fmt-build.log"
-
-      - name: Install Robin-map headers
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          mkdir -p "$PREFIX/include/tsl"
-
-          cp -a \
-            "$SRC/robinmap/include/tsl/." \
-            "$PREFIX/include/tsl/"
-
-          test -f "$PREFIX/include/tsl/robin_map.h"
-          test -f "$PREFIX/include/tsl/robin_set.h"
-
-      # FIX: build pystring 1.1.4 as an Android ARM64 static library.
-      # This makes the header and archive available in the final prefix,
-      # rather than relying on OCIO's temporary ext/dist directory.
-      - name: Build and install Android pystring
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          cmake \
-            -S "$SRC/pystring" \
-            -B "$BUILD/pystring" \
-            -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM="android-${ANDROID_API}" \
-            -DANDROID_STL=c++_static \
-            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_INSTALL_LIBDIR=lib \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DBUILD_SHARED_LIBS=OFF \
-            2>&1 | tee "$LOGS/pystring-configure.log"
-
-          cmake --build "$BUILD/pystring" \
-            --parallel 2 \
-            2>&1 | tee "$LOGS/pystring-build.log"
-
-          cmake --install "$BUILD/pystring" \
-            2>&1 | tee "$LOGS/pystring-install.log"
-
-          PYSTRING_HEADER="$(
-            find "$PREFIX/include" \
-              -type f \
-              -name pystring.h \
-              -print \
-              -quit
-          )"
-
-          PYSTRING_LIBRARY="$(
-            find "$PREFIX/lib" \
-              -maxdepth 1 \
-              -type f \
-              -name libpystring.a \
-              -print \
-              -quit
-          )"
-
-          if [ -z "$PYSTRING_HEADER" ]; then
-            echo "ERROR: pystring.h was not installed"
-            find "$PREFIX/include" -maxdepth 3 -type f -print | sort
-            exit 1
-          fi
-
-          if [ -z "$PYSTRING_LIBRARY" ]; then
-            echo "ERROR: libpystring.a was not installed"
-            find "$PREFIX/lib" -maxdepth 1 -type f -print | sort
-            exit 1
-          fi
-
-          PYSTRING_INCLUDE_DIR="$(dirname "$PYSTRING_HEADER")"
-
-          echo "pystring header: $PYSTRING_HEADER"
-          echo "pystring include directory: $PYSTRING_INCLUDE_DIR"
-          echo "pystring library: $PYSTRING_LIBRARY"
-
-          echo "PYSTRING_INCLUDE_DIR=$PYSTRING_INCLUDE_DIR" \
-            >> "$GITHUB_ENV"
-
-          echo "PYSTRING_LIBRARY=$PYSTRING_LIBRARY" \
-            >> "$GITHUB_ENV"
-
-      - name: Verify pystring installation
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          test -f "$PYSTRING_INCLUDE_DIR/pystring.h"
-          test -f "$PYSTRING_LIBRARY"
-
-          echo "pystring header and static library are installed."
-          echo "Include directory: $PYSTRING_INCLUDE_DIR"
-          echo "Library: $PYSTRING_LIBRARY"
-
-          ar t "$PYSTRING_LIBRARY" | sed -n '1,10p'
-
-      - name: Build OpenColorIO
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          cmake \
-            -S "$SRC/opencolorio" \
-            -B "$BUILD/opencolorio" \
-            -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM="android-${ANDROID_API}" \
-            -DANDROID_STL=c++_static \
-            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_PREFIX_PATH="$PREFIX" \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DOCIO_INSTALL_EXT_PACKAGES=MISSING \
             -DOCIO_BUILD_APPS=OFF \
-            -DOCIO_BUILD_OPENFX=OFF \
-            -DOCIO_BUILD_NUKE=OFF \
             -DOCIO_BUILD_TESTS=OFF \
-            -DOCIO_BUILD_GPU_TESTS=OFF \
             -DOCIO_BUILD_DOCS=OFF \
             -DOCIO_BUILD_PYTHON=OFF \
+            -DOCIO_BUILD_GPU_TESTS=OFF \
+            -DOCIO_BUILD_NUKE=OFF \
             -DOCIO_BUILD_JAVA=OFF \
-            -DOCIO_USE_OIIO_FOR_APPS=OFF \
-            -DImath_DIR="$PREFIX/lib/cmake/Imath" \
-            -Dpystring_ROOT="$PREFIX" \
+            -DOCIO_INSTALL_EXT_PACKAGES=MISSING \
+            -DImath_DIR="$OIIO_PREFIX/lib/cmake/Imath" \
+            -Dpystring_ROOT="$OIIO_PREFIX" \
             -Dpystring_INCLUDE_DIR="$PYSTRING_INCLUDE_DIR" \
-            -Dpystring_LIBRARY="$PYSTRING_LIBRARY" \
-            2>&1 | tee "$LOGS/opencolorio-configure.log"
+            -Dpystring_LIBRARY="$PYSTRING_LIBRARY"
 
-          echo
-          echo "========== OpenColorIO pystring configuration =========="
+          # Stage OCIO's bundled dependencies in the shared prefix if produced.
+          if [ -d "$OIIO_BUILD/opencolorio/ext/dist" ]; then
+            cp -a "$OIIO_BUILD/opencolorio/ext/dist/." "$OIIO_PREFIX/"
+          fi
 
-          grep -i pystring "$BUILD/opencolorio/CMakeCache.txt" || true
+          test -s "$OIIO_PREFIX/include/pystring.h"
+          test -s "$OIIO_PREFIX/lib/libpystring.a"
+          test -f "$OIIO_PREFIX/lib/cmake/OpenColorIO/OpenColorIOConfig.cmake"
 
-          cmake --build "$BUILD/opencolorio" \
-            --target install \
-            --parallel 2 \
-            2>&1 | tee "$LOGS/opencolorio-build.log"
-
-      - name: Collect OpenColorIO bundled dependencies
+      - name: Configure and build Android OpenImageIO
         shell: bash
         run: |
           set -euxo pipefail
+          source "$OIIO_ROOT/common.sh"
+          rm -rf "$OIIO_BUILD/OpenImageIO"
 
-          # Preserve the explicitly installed pystring 1.1.4 in PREFIX.
-          # OCIO_INSTALL_EXT_PACKAGES=MISSING should use that installation
-          # instead of rebuilding pystring inside ext/dist.
-          if [ -d "$BUILD/opencolorio/ext/dist" ]; then
-            cp -a \
-              "$BUILD/opencolorio/ext/dist/." \
-              "$PREFIX/"
-          fi
-
-          # Verify that collection did not leave pystring absent.
-          test -f "$PYSTRING_INCLUDE_DIR/pystring.h"
-          test -f "$PYSTRING_LIBRARY"
-
-          echo
-          echo "OpenColorIO external dependency files:"
-
-          if [ -d "$BUILD/opencolorio/ext/dist" ]; then
-            find "$BUILD/opencolorio/ext/dist" \
-              -maxdepth 4 \
-              -type f \
-              -print \
-              | sort
-          else
-            echo "No OCIO ext/dist directory."
-          fi
-
-          echo
-          echo "Confirmed pystring installation:"
-          echo "$PYSTRING_INCLUDE_DIR/pystring.h"
-          echo "$PYSTRING_LIBRARY"
-
-      - name: Configure OpenImageIO
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          # Check pystring before the OIIO configure step.
-          test -f "$PYSTRING_INCLUDE_DIR/pystring.h"
-          test -f "$PYSTRING_LIBRARY"
-
-          cmake \
-            -S "$SRC/OpenImageIO" \
-            -B "$BUILD/oiio" \
-            -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM="android-${ANDROID_API}" \
-            -DANDROID_STL=c++_static \
-            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_STANDARD=11 \
-            -DCMAKE_CXX_STANDARD=17 \
-            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-            -DCMAKE_INSTALL_LIBDIR=lib \
-            -DCMAKE_PREFIX_PATH="$PREFIX" \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+          cmake -S "$OIIO_SRC/OpenImageIO" -B "$OIIO_BUILD/OpenImageIO" -G Ninja \
+            "${COMMON_CMAKE_ARGS[@]}" \
             -DBUILD_SHARED_LIBS=OFF \
-            -DLINKSTATIC=ON \
-            -DOpenImageIO_BUILD_MISSING_DEPS=OFF \
+            -DBUILD_TESTING=OFF \
             -DOIIO_BUILD_TESTS=OFF \
             -DOIIO_BUILD_TOOLS=OFF \
+            -DOIIO_BUILD_DOCS=OFF \
             -DUSE_PYTHON=OFF \
-            -DUSE_QT=OFF \
-            -DUSE_OPENGL=OFF \
             -DUSE_TBB=OFF \
             -DUSE_FFMPEG=OFF \
             -DUSE_OPENCV=OFF \
             -DUSE_OPENVDB=OFF \
-            -DUSE_LIBRAW=OFF \
-            -DUSE_WEBP=OFF \
-            -DUSE_JXL=OFF \
-            -DUSE_LIBHEIF=OFF \
+            -DUSE_QT=OFF \
             -DUSE_OPENJPEG=OFF \
             -DUSE_FREETYPE=OFF \
-            -DUSE_EXTERNAL_PUGIXML=OFF \
-            -DOIIO_USE_COMPILED_FMT=OFF \
-            -DOIIO_INTERNALIZE_FMT=ON \
-            -DZLIB_ROOT="$PREFIX" \
-            -DPNG_ROOT="$PREFIX" \
-            -DTIFF_ROOT="$PREFIX" \
-            -DCMAKE_FIND_ROOT_PATH="$PREFIX" \
-            -DImath_DIR="$PREFIX/lib/cmake/Imath" \
-            -DOpenEXR_DIR="$PREFIX/lib/cmake/OpenEXR" \
-            -DOpenColorIO_DIR="$PREFIX/lib/cmake/OpenColorIO" \
-            -Dfmt_DIR="$PREFIX/lib/cmake/fmt" \
-            -Dpystring_ROOT="$PREFIX" \
+            -DUSE_GIF=OFF \
+            -DUSE_WEBP=OFF \
+            -DUSE_HEIF=OFF \
+            -DUSE_JXL=OFF \
+            -DUSE_NUKE=OFF \
+            -DUSE_PTEX=OFF \
+            -DUSE_OPENEXR=ON \
+            -DUSE_OCIO=ON \
+            -DUSE_TIFF=ON \
+            -DUSE_PNG=ON \
+            -DUSE_JPEG=ON \
+            -DImath_DIR="$OIIO_PREFIX/lib/cmake/Imath" \
+            -DOpenEXR_DIR="$OIIO_PREFIX/lib/cmake/OpenEXR" \
+            -DOpenColorIO_DIR="$OIIO_PREFIX/lib/cmake/OpenColorIO" \
+            -DOpenColorIO_ROOT="$OIIO_PREFIX" \
+            -Dfmt_ROOT="$OIIO_PREFIX" \
+            -Dfmt_DIR="$OIIO_PREFIX/lib/cmake/fmt" \
+            -Drobinmap_ROOT="$OIIO_PREFIX" \
+            -Dpystring_ROOT="$OIIO_PREFIX" \
             -Dpystring_INCLUDE_DIR="$PYSTRING_INCLUDE_DIR" \
             -Dpystring_LIBRARY="$PYSTRING_LIBRARY" \
-            2>&1 | tee "$LOGS/oiio-configure.log"
+            -DJPEG_LIBRARY="$OIIO_PREFIX/lib/libjpeg.a" \
+            -DJPEG_INCLUDE_DIR="$OIIO_PREFIX/include" \
+            -DPNG_LIBRARY="$OIIO_PREFIX/lib/libpng.a" \
+            -DPNG_PNG_INCLUDE_DIR="$OIIO_PREFIX/include" \
+            -DTIFF_LIBRARY="$OIIO_PREFIX/lib/libtiff.a" \
+            -DTIFF_INCLUDE_DIR="$OIIO_PREFIX/include" \
+            -DZLIB_LIBRARY="$OIIO_PREFIX/lib/libz.a" \
+            -DZLIB_INCLUDE_DIR="$OIIO_PREFIX/include" \
+            2>&1 | tee "$OIIO_LOGS/OpenImageIO-configure.log"
 
-      - name: Verify OpenImageIO configuration
+          cmake --build "$OIIO_BUILD/OpenImageIO" --parallel 2 \
+            2>&1 | tee "$OIIO_LOGS/OpenImageIO-build.log"
+
+          cmake --install "$OIIO_BUILD/OpenImageIO" \
+            2>&1 | tee "$OIIO_LOGS/OpenImageIO-install.log"
+
+      - name: Verify ARM64 libraries and write manifest
         shell: bash
         run: |
           set -euxo pipefail
 
-          echo "========== Selected OIIO options =========="
+          test -f "$OIIO_PREFIX/lib/libpystring.a"
+          test -f "$OIIO_PREFIX/include/pystring.h"
+          test -f "$OIIO_PREFIX/lib/cmake/OpenColorIO/OpenColorIOConfig.cmake"
+          test -f "$OIIO_PREFIX/lib/cmake/OpenImageIO/OpenImageIOConfig.cmake"
+          test -s "$OIIO_PREFIX/lib/libz.a"
+          test -s "$OIIO_PREFIX/lib/libjpeg.a"
+          test -s "$OIIO_PREFIX/lib/libpng16.a"
+          test -s "$OIIO_PREFIX/lib/libtiff.a"
+          test -s "$OIIO_PREFIX/lib/libOpenImageIO.a"
 
-          grep -E \
-            '^(USE_EXTERNAL_PUGIXML|OIIO_USE_COMPILED_FMT|OIIO_INTERNALIZE_FMT|OIIO_BUILD_TESTS|OIIO_BUILD_TOOLS|OpenImageIO_BUILD_MISSING_DEPS):' \
-            "$BUILD/oiio/CMakeCache.txt" || true
+          NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          test -x "$NDK_BIN/llvm-readelf"
 
-      - name: Build OpenImageIO
-        shell: bash
-        run: |
-          set -euxo pipefail
+          : > "$OIIO_LOGS/arm64-library-audit.txt"
 
-          cmake --build "$BUILD/oiio" \
-            --target install \
-            --parallel 2 \
-            2>&1 | tee "$LOGS/oiio-build.log"
+          find "$OIIO_PREFIX/lib" -maxdepth 1 -type f -name '*.a' -print \
+            | sort | while read -r archive; do
+                echo "===== $archive =====" \
+                  | tee -a "$OIIO_LOGS/arm64-library-audit.txt"
 
-      - name: Verify Android ARM64 libraries
-        shell: bash
-        run: |
-          set -euxo pipefail
+                "$NDK_BIN/llvm-ar" t "$archive" >/dev/null
 
-          echo "=========================================="
-          echo " Android ARM64 OIIO dependency verification"
-          echo "=========================================="
+                member="$("$NDK_BIN/llvm-ar" t "$archive" | head -n 1 || true)"
 
-          echo
-          echo "Installed libraries:"
+                if [ -n "$member" ]; then
+                  tmpdir="$(mktemp -d)"
 
-          find "$PREFIX/lib" \
-            -maxdepth 1 \
-            -type f \
-            \( -name '*.a' -o -name '*.so' \) \
-            -print \
-            | sort
+                  if (cd "$tmpdir" && "$NDK_BIN/llvm-ar" x "$archive" "$member" >/dev/null 2>&1); then
+                    "$NDK_BIN/llvm-readelf" -h "$tmpdir/$member" 2>/dev/null \
+                      | grep -E 'Class:|Machine:' \
+                      | tee -a "$OIIO_LOGS/arm64-library-audit.txt" || true
+                  fi
 
-          find_static() {
-            local pattern="$1"
-            local result
+                  rm -rf "$tmpdir"
+                fi
+              done
 
-            result="$(
-              find "$PREFIX/lib" \
-                -maxdepth 1 \
-                -type f \
-                -name "$pattern" \
-                -print \
-                -quit
-            )"
-
-            if [ -z "$result" ]; then
-              echo
-              echo "ERROR: Missing library matching: $pattern"
-              echo
-              echo "Available static libraries:"
-
-              find "$PREFIX/lib" \
-                -maxdepth 1 \
-                -type f \
-                -name '*.a' \
-                -print \
-                | sort
-
-              exit 1
-            fi
-
-            printf '%s\n' "$result"
-          }
-
-          check_archive() {
-            local archive="$1"
-            local name="$2"
-            local tmp
-            local obj
-
+          {
+            echo "OpenImageIO Android ARM64 bootstrap"
+            echo "Android API: $ANDROID_API"
+            echo "NDK: $ANDROID_NDK_VERSION"
+            echo "OpenImageIO: $OIIO_VERSION"
+            echo "OpenColorIO: $OPENCOLORIO_VERSION"
+            echo "Prefix: $OIIO_PREFIX"
+            echo "Built on: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             echo
-            echo "=========================================="
-            echo " Checking $name"
-            echo " Archive: $archive"
-            echo "=========================================="
+            find "$OIIO_PREFIX" -maxdepth 4 -type f | sort
+          } | tee "$OIIO_ROOT/manifest.txt"
 
-            test -f "$archive"
-
-            tmp="$(mktemp -d)"
-
-            (
-              cd "$tmp"
-              ar x "$archive"
-            )
-
-            # Do not use find | head with pipefail:
-            # head can close the pipe early and trigger SIGPIPE.
-            obj="$(
-              find "$tmp" \
-                -type f \
-                -name '*.o' \
-                -print \
-                -quit
-            )"
-
-            if [ -z "$obj" ]; then
-              echo "ERROR: No object files found inside:"
-              echo "$archive"
-              rm -rf "$tmp"
-              exit 1
-            fi
-
-            echo
-            echo "Object selected:"
-            echo "$obj"
-
-            echo
-            echo "ELF header:"
-
-            readelf -h "$obj"
-
-            readelf -h "$obj" |
-              grep -q 'Class:.*ELF64'
-
-            readelf -h "$obj" |
-              grep -q 'Machine:.*AArch64'
-
-            echo
-            echo "PASS: $name is ELF64 AArch64"
-
-            rm -rf "$tmp"
-          }
-
-          IMATH_LIB="$(find_static 'libImath*.a')"
-          OPENEXR_LIB="$(find_static 'libOpenEXR*.a')"
-          OCIO_LIB="$(find_static 'libOpenColorIO*.a')"
-          OIIO_LIB="$(find_static 'libOpenImageIO*.a')"
-          PYSTRING_LIB="$(find_static 'libpystring.a')"
-
-          echo
-          echo "Detected libraries:"
-          echo "  Imath       = $IMATH_LIB"
-          echo "  OpenEXR     = $OPENEXR_LIB"
-          echo "  OpenColorIO = $OCIO_LIB"
-          echo "  OpenImageIO = $OIIO_LIB"
-          echo "  pystring    = $PYSTRING_LIB"
-
-          check_archive \
-            "$IMATH_LIB" \
-            "Imath"
-
-          check_archive \
-            "$OPENEXR_LIB" \
-            "OpenEXR"
-
-          check_archive \
-            "$OCIO_LIB" \
-            "OpenColorIO"
-
-          check_archive \
-            "$OIIO_LIB" \
-            "OpenImageIO"
-
-          check_archive \
-            "$PYSTRING_LIB" \
-            "pystring"
-
-          echo
-          echo "=========================================="
-          echo " ARM64 verification PASSED"
-          echo "=========================================="
-
-      - name: Verify all important dependency libraries
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          echo "========== Important Android libraries =========="
-
-          required_patterns=(
-            'libImath*.a'
-            'libOpenEXR*.a'
-            'libOpenEXRCore*.a'
-            'libOpenEXRUtil*.a'
-            'libOpenColorIO*.a'
-            'libOpenImageIO*.a'
-            'libOpenImageIO_Util*.a'
-            'libfmt*.a'
-            'libjpeg*.a'
-            'libpng*.a'
-            'libtiff*.a'
-            'libz*.a'
-            'libpystring.a'
-          )
-
-          for pattern in "${required_patterns[@]}"; do
-            result="$(
-              find "$PREFIX/lib" \
-                -maxdepth 1 \
-                -type f \
-                -name "$pattern" \
-                -print \
-                -quit
-            )"
-
-            if [ -z "$result" ]; then
-              echo "ERROR: Missing $pattern"
-              exit 1
-            fi
-
-            echo "FOUND: $result"
-          done
-
-          test -f "$PYSTRING_INCLUDE_DIR/pystring.h"
-
-          echo
-          echo "pystring header: $PYSTRING_INCLUDE_DIR/pystring.h"
-          echo "All important dependency libraries are present."
-
-      - name: Show final prefix
-        shell: bash
-        run: |
-          set -eux
-
-          echo "========== FINAL PREFIX =========="
-
-          find "$PREFIX" \
-            -maxdepth 4 \
-            -type f \
-            -print \
-            | sort
-
-      - name: Package Android OIIO prefix
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          tar \
-            -C "$PREFIX" \
-            -czf \
-            "$GITHUB_WORKSPACE/android-oiio/package/android-arm64-oiio-prefix.tar.gz" \
-            .
-
-      - name: Upload OIIO package
+      - name: Upload Android ARM64 OpenImageIO dependency bundle and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: android-arm64-oiio
-          path: android-oiio/package/android-arm64-oiio-prefix.tar.gz
+          path: |
+            android-oiio/prefix/
+            android-oiio/logs/
+            android-oiio/manifest.txt
           if-no-files-found: warn
           retention-days: 14
-          compression-level: 1
-          overwrite: true
-
-      - name: Upload build logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-oiio-logs
-          path: android-oiio/logs
-          if-no-files-found: warn
-          retention-days: 14
-          compression-level: 6
-          overwrite: true
