@@ -9,10 +9,9 @@ on:
         type: string
         default: "37872328646"
       oiio_run_id:
-        description: "Successful OIIO bootstrap workflow run ID"
+        description: "Run ID of the NEW successful OIIO bootstrap after OpenJPH was added"
         required: true
         type: string
-        default: "38025704348"
 
 permissions:
   contents: read
@@ -133,7 +132,6 @@ jobs:
             cp -a "$ROOT/artifacts/oiio/prefix/." "$ROOT/deps/oiio/"
           else
             OIIO_CONFIG_SOURCE="$(find "$ROOT/artifacts/oiio" -type f -name OpenImageIOConfig.cmake -print -quit || true)"
-
             if [ -n "$OIIO_CONFIG_SOURCE" ]; then
               OIIO_PREFIX_SOURCE="${OIIO_CONFIG_SOURCE%/lib/cmake/OpenImageIO/OpenImageIOConfig.cmake}"
               test -d "$OIIO_PREFIX_SOURCE"
@@ -153,17 +151,14 @@ jobs:
             echo "ERROR: LLVMConfig.cmake was not found." >&2
             exit 1
           }
-
           test -n "$OIIO_CONFIG" || {
             echo "ERROR: OpenImageIOConfig.cmake was not found." >&2
             exit 1
           }
-
           test -n "$TIFF_LIB" || {
             echo "ERROR: libtiff.a was not found." >&2
             exit 1
           }
-
           test -n "$TIFF_HEADER" || {
             echo "ERROR: tiffio.h was not found." >&2
             exit 1
@@ -172,21 +167,44 @@ jobs:
           LLVM_PREFIX="${LLVM_CONFIG%/lib/cmake/llvm/LLVMConfig.cmake}"
           OIIO_PREFIX="${OIIO_CONFIG%/lib/cmake/OpenImageIO/OpenImageIOConfig.cmake}"
           TIFF_INCLUDE_DIR="$(dirname "$TIFF_HEADER")"
+          OPENJPH_CONFIG="$(find "$ROOT/deps/oiio" -type f \
+            \( -iname 'openjphConfig.cmake' -o -iname 'openjph-config.cmake' \) \
+            -print -quit || true)"
+          OPENJPH_LIBRARY="$(find "$ROOT/deps/oiio/lib" -maxdepth 1 -type f \
+            -iname 'libopenjph*.a' -print -quit || true)"
 
-          # The OIIO exports contain absolute paths from the original build.
-          # Recreate the original installation path as a compatibility link.
+          test -n "$OPENJPH_CONFIG" || {
+            echo "ERROR: The selected OIIO artifact has no installed OpenJPH CMake package." >&2
+            echo "Rebuild android-arm64-oiio with the updated bootstrap workflow, then enter its new run ID." >&2
+            exit 1
+          }
+          test -n "$OPENJPH_LIBRARY" || {
+            echo "ERROR: The selected OIIO artifact has no OpenJPH static library." >&2
+            echo "Rebuild android-arm64-oiio with the updated bootstrap workflow, then enter its new run ID." >&2
+            exit 1
+          }
+          OPENJPH_CONFIG_DIR="$(dirname "$OPENJPH_CONFIG")"
+
+          # The installed OIIO export files contain absolute paths from the
+          # bootstrap runner, such as:
+          #   $GITHUB_WORKSPACE/android-oiio/prefix/lib/libpng.a
+          # Recreate that install-prefix path as a compatibility symlink to
+          # the prefix extracted from the artifact, so CMake/Ninja can resolve
+          # those exported paths when linking the diagnostic executable.
           ORIGINAL_PREFIX="$GITHUB_WORKSPACE/android-oiio/prefix"
           mkdir -p "$GITHUB_WORKSPACE/android-oiio"
 
           if [ -e "$ORIGINAL_PREFIX" ] && [ ! -L "$ORIGINAL_PREFIX" ]; then
-            echo "ERROR: The original prefix path already exists as a real directory: $ORIGINAL_PREFIX" >&2
+            echo "ERROR: Cannot create compatibility link because this path already exists as a real directory: $ORIGINAL_PREFIX" >&2
+            echo "Remove/rename that path from the workflow checkout or patch exported CMake paths instead." >&2
             exit 1
           fi
 
           rm -f "$ORIGINAL_PREFIX"
           ln -s "$OIIO_PREFIX" "$ORIGINAL_PREFIX"
 
-          # Artifact ZIPs may not preserve the libpng.a symlink.
+          # GitHub artifact packaging may not preserve the libpng.a symlink.
+          # Recreate it from the real static archive if needed.
           if [ -s "$OIIO_PREFIX/lib/libpng16.a" ] && [ ! -e "$OIIO_PREFIX/lib/libpng.a" ]; then
             ln -s libpng16.a "$OIIO_PREFIX/lib/libpng.a"
           fi
@@ -198,6 +216,8 @@ jobs:
             echo "OIIO_PREFIX=$OIIO_PREFIX"
             echo "TIFF_LIB=$TIFF_LIB"
             echo "TIFF_INCLUDE_DIR=$TIFF_INCLUDE_DIR"
+            echo "OPENJPH_CONFIG=$OPENJPH_CONFIG"
+            echo "OPENJPH_LIBRARY=$OPENJPH_LIBRARY"
             echo "ORIGINAL_PREFIX_COMPAT_LINK=$ORIGINAL_PREFIX -> $OIIO_PREFIX"
             echo "libpng.a exists: $(test -e "$OIIO_PREFIX/lib/libpng.a" && echo yes || echo no)"
             echo "libpng16.a exists: $(test -e "$OIIO_PREFIX/lib/libpng16.a" && echo yes || echo no)"
@@ -208,7 +228,7 @@ jobs:
               -print | sort
             echo
             echo "=== OpenJPH-related files ==="
-            find "$OIIO_PREFIX" \( -iname '*openjph*' -o -iname '*ojph*' \) -print | sort || true
+            find "$OIIO_PREFIX" -iname '*openjph*' -o -iname '*ojph*' | sort || true
           } | tee -a "$ROOT/logs/package-inventory.txt"
 
           {
@@ -218,6 +238,8 @@ jobs:
             echo "OIIO_PREFIX=$OIIO_PREFIX"
             echo "TIFF_LIB=$TIFF_LIB"
             echo "TIFF_INCLUDE_DIR=$TIFF_INCLUDE_DIR"
+            echo "OPENJPH_CONFIG_DIR=$OPENJPH_CONFIG_DIR"
+            echo "OPENJPH_LIBRARY=$OPENJPH_LIBRARY"
           } >> "$GITHUB_ENV"
 
           cat > "$ROOT/probe-tiff/CMakeLists.txt" <<'CMAKE'
@@ -321,27 +343,11 @@ jobs:
           find_package(TIFF MODULE REQUIRED)
           find_package(Imath CONFIG REQUIRED)
 
-          # Prefer a real OpenJPH library if one is present in the prefix.
+          # OpenEXRCore's static library has real OpenJPH symbols for HTJ2K.
+          # Load the real OpenJPH package before importing OpenEXR; no dummy target.
+          find_package(openjph 0.32.0 CONFIG REQUIRED)
           if(NOT TARGET openjph)
-            file(GLOB _openjph_archives
-              "${DEP_PREFIX}/lib/libopenjph*.a"
-              "${DEP_PREFIX}/lib/libOpenJPH*.a"
-              "${DEP_PREFIX}/lib/libOpenJPH*.so"
-              "${DEP_PREFIX}/lib/libopenjph*.so")
-
-            if(_openjph_archives)
-              list(GET _openjph_archives 0 _openjph_library)
-              add_library(openjph UNKNOWN IMPORTED GLOBAL)
-              set_target_properties(openjph PROPERTIES
-                IMPORTED_LOCATION "${_openjph_library}")
-              message(STATUS "Using OpenJPH library: ${_openjph_library}")
-            else()
-              add_library(openjph INTERFACE IMPORTED GLOBAL)
-              message(WARNING
-                "No separate OpenJPH library was packaged. Using a temporary "
-                "interface target for configuration; the build/link test will "
-                "check whether the installed libraries need it.")
-            endif()
+            message(FATAL_ERROR "openjph package was found but did not define target 'openjph'")
           endif()
 
           find_package(OpenEXR CONFIG REQUIRED)
@@ -349,7 +355,6 @@ jobs:
           if(NOT TARGET Imath::Imath)
             message(FATAL_ERROR "Imath::Imath target was not created")
           endif()
-
           if(NOT TARGET OpenEXR::OpenEXR)
             message(FATAL_ERROR "OpenEXR::OpenEXR target was not created")
           endif()
@@ -433,6 +438,7 @@ jobs:
             -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
             -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
             -DDEP_PREFIX="$OIIO_PREFIX" \
+            -Dopenjph_DIR="$OPENJPH_CONFIG_DIR" \
             -DOpenImageIO_DIR="$(dirname "$OIIO_CONFIG")" \
             -DOpenColorIO_DIR="$OIIO_PREFIX/lib/cmake/OpenColorIO" \
             -DOpenEXR_DIR="$OIIO_PREFIX/lib/cmake/OpenEXR" \
