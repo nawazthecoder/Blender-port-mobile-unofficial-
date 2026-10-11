@@ -16,6 +16,7 @@ env:
   OIIO_VERSION: "v3.1.13.1"
   IMATH_VERSION: "v3.2.2"
   OPENEXR_VERSION: "v3.4.10"
+  OPENJPH_VERSION: "0.32.0"
   OPENCOLORIO_VERSION: "v2.5.0"
   FMT_VERSION: "12.1.0"
   ROBINMAP_VERSION: "v1.3.0"
@@ -36,13 +37,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      # FIX: Do not request the obsolete SDK package named "tools".
-      - name: Install Android SDK tools and NDK
-        uses: android-actions/setup-android@v4
-        with:
-          packages: 'platform-tools'
-
-      - name: Install build tools
+      - name: Install build tools and Android NDK
         shell: bash
         run: |
           set -euxo pipefail
@@ -50,6 +45,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential \
             ca-certificates \
+            curl \
             git \
             ninja-build \
             pkg-config \
@@ -57,10 +53,24 @@ jobs:
             unzip \
             zip
 
-          sdkmanager --install "ndk;${ANDROID_NDK_VERSION}"
+          NDK_ARCHIVE="$RUNNER_TEMP/android-ndk-r27d-linux.zip"
+          NDK_URL="https://dl.google.com/android/repository/android-ndk-r27d-linux.zip"
+          NDK_SHA1="22105e410cf29afcf163760cc95522b9fb981121"
 
-          test -x "$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+          curl --fail --show-error --location \
+            --retry 5 --retry-all-errors --retry-delay 3 \
+            "$NDK_URL" -o "$NDK_ARCHIVE"
 
+          echo "$NDK_SHA1  $NDK_ARCHIVE" | sha1sum --check -
+          rm -rf "$RUNNER_TEMP/android-ndk-r27d"
+          unzip -q "$NDK_ARCHIVE" -d "$RUNNER_TEMP"
+
+          ANDROID_NDK_HOME="$RUNNER_TEMP/android-ndk-r27d"
+          test -f "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
+          test -x "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+          "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" --version
+
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> "$GITHUB_ENV"
           cmake --version
           ninja --version
 
@@ -68,14 +78,13 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-
           ROOT="$GITHUB_WORKSPACE/android-oiio"
           SRC="$ROOT/src"
           BUILD="$ROOT/build"
           PREFIX="$ROOT/prefix"
           LOGS="$ROOT/logs"
-          TOOLCHAIN="$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}/build/cmake/android.toolchain.cmake"
-          ANDROID_NDK_HOME="$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}"
+          ANDROID_NDK_HOME="$RUNNER_TEMP/android-ndk-r27d"
+          TOOLCHAIN="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
 
           mkdir -p "$SRC" "$BUILD" "$PREFIX" "$LOGS"
           test -f "$TOOLCHAIN"
@@ -92,7 +101,6 @@ jobs:
 
           cat > "$ROOT/common.sh" <<'BASH'
           set -Eeuo pipefail
-
           COMMON_CMAKE_ARGS=(
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_TOOLCHAIN_FILE"
             -DANDROID_ABI=arm64-v8a
@@ -119,16 +127,13 @@ jobs:
 
             test -d "$source"
             rm -rf "$build_dir"
-
             cmake -S "$source" -B "$build_dir" -G Ninja \
               "${COMMON_CMAKE_ARGS[@]}" \
               -DBUILD_SHARED_LIBS=OFF \
               "$@" \
               2>&1 | tee "$OIIO_LOGS/${name}-configure.log"
-
             cmake --build "$build_dir" --parallel 2 \
               2>&1 | tee "$OIIO_LOGS/${name}-build.log"
-
             cmake --install "$build_dir" \
               2>&1 | tee "$OIIO_LOGS/${name}-install.log"
           }
@@ -138,12 +143,8 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-
           clone_tag() {
-            local url="$1"
-            local tag="$2"
-            local dest="$3"
-
+            local url="$1" tag="$2" dest="$3"
             if [ -d "$dest/.git" ]; then
               git -C "$dest" fetch --depth 1 origin "$tag"
               git -C "$dest" checkout --detach FETCH_HEAD
@@ -152,51 +153,23 @@ jobs:
             fi
           }
 
-          clone_tag https://github.com/madler/zlib.git \
-            "$ZLIB_VERSION" "$OIIO_SRC/zlib"
+          clone_tag https://github.com/madler/zlib.git "$ZLIB_VERSION" "$OIIO_SRC/zlib"
+          clone_tag https://github.com/AcademySoftwareFoundation/Imath.git "$IMATH_VERSION" "$OIIO_SRC/imath"
+          clone_tag https://github.com/AcademySoftwareFoundation/openexr.git "$OPENEXR_VERSION" "$OIIO_SRC/openexr"
+          clone_tag https://github.com/aous72/OpenJPH.git "$OPENJPH_VERSION" "$OIIO_SRC/openjph"
+          clone_tag https://github.com/AcademySoftwareFoundation/OpenColorIO.git "$OPENCOLORIO_VERSION" "$OIIO_SRC/opencolorio"
+          clone_tag https://github.com/AcademySoftwareFoundation/OpenImageIO.git "$OIIO_VERSION" "$OIIO_SRC/OpenImageIO"
+          clone_tag https://github.com/fmtlib/fmt.git "$FMT_VERSION" "$OIIO_SRC/fmt"
+          clone_tag https://github.com/Tessil/robin-map.git "$ROBINMAP_VERSION" "$OIIO_SRC/robin-map"
+          clone_tag https://github.com/imageworks/pystring.git "$PYSTRING_VERSION" "$OIIO_SRC/pystring"
+          clone_tag https://github.com/pnggroup/libpng.git "$PNG_VERSION" "$OIIO_SRC/libpng"
+          clone_tag https://github.com/libjpeg-turbo/libjpeg-turbo.git "$JPEG_VERSION" "$OIIO_SRC/libjpeg-turbo"
+          clone_tag https://gitlab.com/libtiff/libtiff.git "$TIFF_VERSION" "$OIIO_SRC/libtiff"
 
-          clone_tag https://github.com/AcademySoftwareFoundation/Imath.git \
-            "$IMATH_VERSION" "$OIIO_SRC/imath"
-
-          clone_tag https://github.com/AcademySoftwareFoundation/openexr.git \
-            "$OPENEXR_VERSION" "$OIIO_SRC/openexr"
-
-          clone_tag https://github.com/AcademySoftwareFoundation/OpenColorIO.git \
-            "$OPENCOLORIO_VERSION" "$OIIO_SRC/opencolorio"
-
-          clone_tag https://github.com/AcademySoftwareFoundation/OpenImageIO.git \
-            "$OIIO_VERSION" "$OIIO_SRC/OpenImageIO"
-
-          clone_tag https://github.com/fmtlib/fmt.git \
-            "$FMT_VERSION" "$OIIO_SRC/fmt"
-
-          clone_tag https://github.com/Tessil/robin-map.git \
-            "$ROBINMAP_VERSION" "$OIIO_SRC/robin-map"
-
-          clone_tag https://github.com/imageworks/pystring.git \
-            "$PYSTRING_VERSION" "$OIIO_SRC/pystring"
-
-          clone_tag https://github.com/pnggroup/libpng.git \
-            "$PNG_VERSION" "$OIIO_SRC/libpng"
-
-          clone_tag https://github.com/libjpeg-turbo/libjpeg-turbo.git \
-            "$JPEG_VERSION" "$OIIO_SRC/libjpeg-turbo"
-
-          clone_tag https://gitlab.com/libtiff/libtiff.git \
-            "$TIFF_VERSION" "$OIIO_SRC/libtiff"
-
-          printf 'OIIO=%s\nIMATH=%s\nOPENEXR=%s\nOCIO=%s\nFMT=%s\nROBINMAP=%s\nPYSTRING=%s\nZLIB=%s\nPNG=%s\nJPEG=%s\nTIFF=%s\n' \
-            "$OIIO_VERSION" \
-            "$IMATH_VERSION" \
-            "$OPENEXR_VERSION" \
-            "$OPENCOLORIO_VERSION" \
-            "$FMT_VERSION" \
-            "$ROBINMAP_VERSION" \
-            "$PYSTRING_VERSION" \
-            "$ZLIB_VERSION" \
-            "$PNG_VERSION" \
-            "$JPEG_VERSION" \
-            "$TIFF_VERSION" \
+          printf 'OIIO=%s\nIMATH=%s\nOPENEXR=%s\nOPENJPH=%s\nOCIO=%s\nFMT=%s\nROBINMAP=%s\nPYSTRING=%s\nZLIB=%s\nPNG=%s\nJPEG=%s\nTIFF=%s\n' \
+            "$OIIO_VERSION" "$IMATH_VERSION" "$OPENEXR_VERSION" "$OPENJPH_VERSION" "$OPENCOLORIO_VERSION" \
+            "$FMT_VERSION" "$ROBINMAP_VERSION" "$PYSTRING_VERSION" "$ZLIB_VERSION" \
+            "$PNG_VERSION" "$JPEG_VERSION" "$TIFF_VERSION" \
             | tee "$OIIO_LOGS/source-versions.txt"
 
       - name: Build Android zlib, Imath, fmt, robin-map, and pystring
@@ -218,27 +191,21 @@ jobs:
             -DFMT_DOC=OFF \
             -DFMT_INSTALL=ON
 
-          # robin-map is header-only.
           test -f "$OIIO_SRC/robin-map/include/tsl/robin_map.h"
           mkdir -p "$OIIO_PREFIX/include/tsl"
-          cp -a "$OIIO_SRC/robin-map/include/tsl/." \
-            "$OIIO_PREFIX/include/tsl/"
+          cp -a "$OIIO_SRC/robin-map/include/tsl/." "$OIIO_PREFIX/include/tsl/"
 
-          # Fix pystring: build a static PIC library and install its header.
           test -f "$OIIO_SRC/pystring/pystring.cpp"
           test -f "$OIIO_SRC/pystring/pystring.h"
-
           cat > "$OIIO_SRC/pystring/CMakeLists.txt" <<'CMAKE'
           cmake_minimum_required(VERSION 3.10)
           project(pystring LANGUAGES CXX)
 
           add_library(pystring STATIC pystring.cpp)
-
           set_target_properties(pystring PROPERTIES
             POSITION_INDEPENDENT_CODE ON
             PUBLIC_HEADER pystring.h
           )
-
           install(TARGETS pystring
             ARCHIVE DESTINATION lib
             PUBLIC_HEADER DESTINATION include
@@ -246,19 +213,15 @@ jobs:
           CMAKE
 
           run_cmake_project pystring "$OIIO_SRC/pystring"
-
           test -s "$OIIO_PREFIX/include/pystring.h"
           test -s "$OIIO_PREFIX/lib/libpystring.a"
-
-          ar t "$OIIO_PREFIX/lib/libpystring.a" \
-            | tee "$OIIO_LOGS/pystring-archive-members.txt"
-
+          ar t "$OIIO_PREFIX/lib/libpystring.a" | tee "$OIIO_LOGS/pystring-archive-members.txt"
           {
             echo "PYSTRING_INCLUDE_DIR=$OIIO_PREFIX/include"
             echo "PYSTRING_LIBRARY=$OIIO_PREFIX/lib/libpystring.a"
           } >> "$GITHUB_ENV"
 
-      - name: Build Android JPEG, PNG, TIFF, and OpenEXR
+      - name: Build Android JPEG, PNG, TIFF, OpenJPH, and OpenEXR
         shell: bash
         run: |
           set -euxo pipefail
@@ -284,15 +247,12 @@ jobs:
           ln -sf libpng16.a "$OIIO_PREFIX/lib/libpng.a"
 
           if [ ! -f "$OIIO_PREFIX/include/png.h" ]; then
-            cp "$OIIO_SRC/libpng/png.h" \
-              "$OIIO_SRC/libpng/pngconf.h" \
-              "$OIIO_PREFIX/include/"
+            cp "$OIIO_SRC/libpng/png.h" "$OIIO_SRC/libpng/pngconf.h" "$OIIO_PREFIX/include/"
           fi
 
           if [ ! -f "$OIIO_PREFIX/include/pnglibconf.h" ]; then
             test -f "$OIIO_BUILD/libpng/pnglibconf.h"
-            cp "$OIIO_BUILD/libpng/pnglibconf.h" \
-              "$OIIO_PREFIX/include/pnglibconf.h"
+            cp "$OIIO_BUILD/libpng/pnglibconf.h" "$OIIO_PREFIX/include/pnglibconf.h"
           fi
 
           run_cmake_project libtiff "$OIIO_SRC/libtiff" \
@@ -315,12 +275,46 @@ jobs:
             -DZLIB_LIBRARY="$OIIO_PREFIX/lib/libz.a" \
             -DZLIB_INCLUDE_DIR="$OIIO_PREFIX/include"
 
+          # Build and install the real OpenJPH static library.
+          run_cmake_project openjph "$OIIO_SRC/openjph" \
+            -DOJPH_BUILD_TESTS=OFF \
+            -DOJPH_ENABLE_TIFF_SUPPORT=OFF \
+            -DOJPH_BUILD_EXECUTABLES=OFF
+
+          OPENJPH_CONFIG="$(find "$OIIO_PREFIX" -type f \
+            \( -iname 'openjphConfig.cmake' -o -iname 'openjph-config.cmake' \) \
+            -print -quit || true)"
+
+          OPENJPH_LIBRARY="$(find "$OIIO_PREFIX/lib" -maxdepth 1 -type f \
+            -iname 'libopenjph*.a' -print -quit || true)"
+
+          test -n "$OPENJPH_CONFIG" || {
+            echo "ERROR: OpenJPH CMake package was not installed." >&2
+            find "$OIIO_PREFIX" -iname '*openjph*' -print >&2 || true
+            exit 1
+          }
+
+          test -n "$OPENJPH_LIBRARY" || {
+            echo "ERROR: OpenJPH static library was not installed." >&2
+            find "$OIIO_PREFIX" -iname '*openjph*' -print >&2 || true
+            exit 1
+          }
+
+          OPENJPH_CONFIG_DIR="$(dirname "$OPENJPH_CONFIG")"
+          {
+            echo "OPENJPH_CONFIG_DIR=$OPENJPH_CONFIG_DIR"
+            echo "OPENJPH_LIBRARY=$OPENJPH_LIBRARY"
+          } >> "$GITHUB_ENV"
+
+          # Explicitly use the separately installed OpenJPH dependency.
           run_cmake_project openexr "$OIIO_SRC/openexr" \
             -DBUILD_TESTING=OFF \
             -DOPENEXR_BUILD_TOOLS=OFF \
             -DOPENEXR_BUILD_EXAMPLES=OFF \
             -DOPENEXR_BUILD_TESTS=OFF \
             -DOPENEXR_INSTALL=ON \
+            -DOPENEXR_FORCE_INTERNAL_OPENJPH=OFF \
+            -Dopenjph_DIR="$OPENJPH_CONFIG_DIR" \
             -DImath_DIR="$OIIO_PREFIX/lib/cmake/Imath" \
             -DZLIB_LIBRARY="$OIIO_PREFIX/lib/libz.a" \
             -DZLIB_INCLUDE_DIR="$OIIO_PREFIX/include"
@@ -389,6 +383,7 @@ jobs:
             -DUSE_JPEG=ON \
             -DImath_DIR="$OIIO_PREFIX/lib/cmake/Imath" \
             -DOpenEXR_DIR="$OIIO_PREFIX/lib/cmake/OpenEXR" \
+            -Dopenjph_DIR="$OPENJPH_CONFIG_DIR" \
             -DOpenColorIO_DIR="$OIIO_PREFIX/lib/cmake/OpenColorIO" \
             -DOpenColorIO_ROOT="$OIIO_PREFIX" \
             -Dfmt_ROOT="$OIIO_PREFIX" \
@@ -417,7 +412,6 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-
           test -f "$OIIO_PREFIX/lib/libpystring.a"
           test -f "$OIIO_PREFIX/include/pystring.h"
           test -f "$OIIO_PREFIX/lib/cmake/OpenColorIO/OpenColorIOConfig.cmake"
@@ -426,39 +420,39 @@ jobs:
           test -s "$OIIO_PREFIX/lib/libjpeg.a"
           test -s "$OIIO_PREFIX/lib/libpng16.a"
           test -s "$OIIO_PREFIX/lib/libtiff.a"
+          test -s "$OIIO_PREFIX/lib/libopenjph.a"
           test -s "$OIIO_PREFIX/lib/libOpenImageIO.a"
+          test -n "$(find "$OIIO_PREFIX" -type f \
+            \( -iname 'openjphConfig.cmake' -o -iname 'openjph-config.cmake' \) \
+            -print -quit)"
 
           NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
           test -x "$NDK_BIN/llvm-readelf"
-
           : > "$OIIO_LOGS/arm64-library-audit.txt"
 
-          find "$OIIO_PREFIX/lib" -maxdepth 1 -type f -name '*.a' -print \
-            | sort | while read -r archive; do
-              echo "===== $archive =====" \
-                | tee -a "$OIIO_LOGS/arm64-library-audit.txt"
+          find "$OIIO_PREFIX/lib" -maxdepth 1 -type f -name '*.a' -print | sort | while read -r archive; do
+            echo "===== $archive =====" | tee -a "$OIIO_LOGS/arm64-library-audit.txt"
+            "$NDK_BIN/llvm-ar" t "$archive" >/dev/null
+            member="$("$NDK_BIN/llvm-ar" t "$archive" | head -n 1 || true)"
 
-              "$NDK_BIN/llvm-ar" t "$archive" >/dev/null
-              member="$("$NDK_BIN/llvm-ar" t "$archive" | head -n 1 || true)"
-
-              if [ -n "$member" ]; then
-                tmpdir="$(mktemp -d)"
-
-                if (cd "$tmpdir" && "$NDK_BIN/llvm-ar" x "$archive" "$member" >/dev/null 2>&1); then
-                  "$NDK_BIN/llvm-readelf" -h "$tmpdir/$member" 2>/dev/null \
-                    | grep -E 'Class:|Machine:' \
-                    | tee -a "$OIIO_LOGS/arm64-library-audit.txt" || true
-                fi
-
-                rm -rf "$tmpdir"
+            if [ -n "$member" ]; then
+              tmpdir="$(mktemp -d)"
+              if (cd "$tmpdir" && "$NDK_BIN/llvm-ar" x "$archive" "$member" >/dev/null 2>&1); then
+                "$NDK_BIN/llvm-readelf" -h "$tmpdir/$member" 2>/dev/null \
+                  | grep -E 'Class:|Machine:' \
+                  | tee -a "$OIIO_LOGS/arm64-library-audit.txt" || true
               fi
-            done
+              rm -rf "$tmpdir"
+            fi
+          done
 
           {
             echo "OpenImageIO Android ARM64 bootstrap"
             echo "Android API: $ANDROID_API"
             echo "NDK: $ANDROID_NDK_VERSION"
             echo "OpenImageIO: $OIIO_VERSION"
+            echo "OpenEXR: $OPENEXR_VERSION"
+            echo "OpenJPH: $OPENJPH_VERSION"
             echo "OpenColorIO: $OPENCOLORIO_VERSION"
             echo "Prefix: $OIIO_PREFIX"
             echo "Built on: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
