@@ -133,6 +133,7 @@ jobs:
             cp -a "$ROOT/artifacts/oiio/prefix/." "$ROOT/deps/oiio/"
           else
             OIIO_CONFIG_SOURCE="$(find "$ROOT/artifacts/oiio" -type f -name OpenImageIOConfig.cmake -print -quit || true)"
+
             if [ -n "$OIIO_CONFIG_SOURCE" ]; then
               OIIO_PREFIX_SOURCE="${OIIO_CONFIG_SOURCE%/lib/cmake/OpenImageIO/OpenImageIOConfig.cmake}"
               test -d "$OIIO_PREFIX_SOURCE"
@@ -152,14 +153,17 @@ jobs:
             echo "ERROR: LLVMConfig.cmake was not found." >&2
             exit 1
           }
+
           test -n "$OIIO_CONFIG" || {
             echo "ERROR: OpenImageIOConfig.cmake was not found." >&2
             exit 1
           }
+
           test -n "$TIFF_LIB" || {
             echo "ERROR: libtiff.a was not found." >&2
             exit 1
           }
+
           test -n "$TIFF_HEADER" || {
             echo "ERROR: tiffio.h was not found." >&2
             exit 1
@@ -169,6 +173,24 @@ jobs:
           OIIO_PREFIX="${OIIO_CONFIG%/lib/cmake/OpenImageIO/OpenImageIOConfig.cmake}"
           TIFF_INCLUDE_DIR="$(dirname "$TIFF_HEADER")"
 
+          # The OIIO exports contain absolute paths from the original build.
+          # Recreate the original installation path as a compatibility link.
+          ORIGINAL_PREFIX="$GITHUB_WORKSPACE/android-oiio/prefix"
+          mkdir -p "$GITHUB_WORKSPACE/android-oiio"
+
+          if [ -e "$ORIGINAL_PREFIX" ] && [ ! -L "$ORIGINAL_PREFIX" ]; then
+            echo "ERROR: The original prefix path already exists as a real directory: $ORIGINAL_PREFIX" >&2
+            exit 1
+          fi
+
+          rm -f "$ORIGINAL_PREFIX"
+          ln -s "$OIIO_PREFIX" "$ORIGINAL_PREFIX"
+
+          # Artifact ZIPs may not preserve the libpng.a symlink.
+          if [ -s "$OIIO_PREFIX/lib/libpng16.a" ] && [ ! -e "$OIIO_PREFIX/lib/libpng.a" ]; then
+            ln -s libpng16.a "$OIIO_PREFIX/lib/libpng.a"
+          fi
+
           {
             echo "LLVM_CONFIG=$LLVM_CONFIG"
             echo "LLVM_PREFIX=$LLVM_PREFIX"
@@ -176,6 +198,9 @@ jobs:
             echo "OIIO_PREFIX=$OIIO_PREFIX"
             echo "TIFF_LIB=$TIFF_LIB"
             echo "TIFF_INCLUDE_DIR=$TIFF_INCLUDE_DIR"
+            echo "ORIGINAL_PREFIX_COMPAT_LINK=$ORIGINAL_PREFIX -> $OIIO_PREFIX"
+            echo "libpng.a exists: $(test -e "$OIIO_PREFIX/lib/libpng.a" && echo yes || echo no)"
+            echo "libpng16.a exists: $(test -e "$OIIO_PREFIX/lib/libpng16.a" && echo yes || echo no)"
             echo
             echo "=== CMake package files ==="
             find "$OIIO_PREFIX" -type f \
@@ -296,8 +321,7 @@ jobs:
           find_package(TIFF MODULE REQUIRED)
           find_package(Imath CONFIG REQUIRED)
 
-          # OpenEXR may reference an external target named "openjph".
-          # Prefer a real installed OpenJPH archive or shared library.
+          # Prefer a real OpenJPH library if one is present in the prefix.
           if(NOT TARGET openjph)
             file(GLOB _openjph_archives
               "${DEP_PREFIX}/lib/libopenjph*.a"
@@ -316,7 +340,7 @@ jobs:
               message(WARNING
                 "No separate OpenJPH library was packaged. Using a temporary "
                 "interface target for configuration; the build/link test will "
-                "determine whether the installed OpenEXR libraries need it.")
+                "check whether the installed libraries need it.")
             endif()
           endif()
 
@@ -325,6 +349,7 @@ jobs:
           if(NOT TARGET Imath::Imath)
             message(FATAL_ERROR "Imath::Imath target was not created")
           endif()
+
           if(NOT TARGET OpenEXR::OpenEXR)
             message(FATAL_ERROR "OpenEXR::OpenEXR target was not created")
           endif()
