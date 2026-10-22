@@ -5,97 +5,43 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
   android-configure:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 360
 
     env:
       BLENDER_VERSION: "5.2.2"
       ANDROID_API: "29"
-      OIIO_RUN_ID: "38116177872"
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_TRIPLET: arm64-android-api29
+      VCPKG_DISABLE_METRICS: "1"
 
     steps:
-      - name: Checkout our repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Show environment
+      - name: Show environment and check NDK
         run: |
-          set -eux
+          set -euxo pipefail
           uname -a
-          echo "CPU: $(nproc)"
+          nproc
           free -h
           df -h /
           cmake --version
           ninja --version
           python3 --version
           git --version
+          test -d "$ANDROID_NDK"
+          test -f "$ANDROID_NDK/build/cmake/android.toolchain.cmake"
+          cat "$ANDROID_NDK/source.properties"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_NDK" >> "$GITHUB_ENV"
 
-      - name: Check Android NDK
+      - name: Download Blender source
         run: |
-          set -eux
-          NDK="$ANDROID_NDK"
-          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
-          test -d "$NDK"
-          test -x "$TOOLCHAIN/bin/clang"
-          cat "$NDK/source.properties"
-          "$TOOLCHAIN/bin/clang" --version
-          "$TOOLCHAIN/bin/clang++" --version
-
-      # Reuse the successful OIIO artifact; do not rebuild it here.
-      - name: Download successful Android OIIO artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: android-arm64-oiio
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          run-id: ${{ env.OIIO_RUN_ID }}
-          path: ${{ runner.temp }}/android-arm64-oiio
-
-      - name: Inspect Android dependency package
-        run: |
-          set -eux
-          PREFIX="$RUNNER_TEMP/android-arm64-oiio/prefix"
-          test -d "$PREFIX"
-          mkdir -p "$GITHUB_WORKSPACE/dependency-audit"
-          {
-            echo "Artifact run: $OIIO_RUN_ID"
-            echo "Prefix: $PREFIX"
-            echo
-            echo "=== PREFIX TOP LEVEL ==="
-            find "$PREFIX" -mindepth 1 -maxdepth 2 -print | sort
-            echo
-            echo "=== CMAKE PACKAGE CONFIGS ==="
-            find "$PREFIX" -type f \
-              \( -iname '*openimageio*config*.cmake' \
-                 -o -iname '*opencolorio*config*.cmake' \
-                 -o -iname '*openexr*config*.cmake' \
-                 -o -iname '*imath*config*.cmake' \
-                 -o -iname '*openjph*config*.cmake' \) \
-              -print | sort
-            echo
-            echo "=== RELEVANT LIBRARIES ==="
-            find "$PREFIX/lib" -maxdepth 2 -type f \
-              \( -iname '*OpenImageIO*' -o -iname '*OpenColorIO*' \
-                 -o -iname '*OpenEXR*' -o -iname '*Imath*' \
-                 -o -iname '*openjph*' \) \
-              -print | sort
-            echo
-            echo "=== ARTIFACT MANIFEST ==="
-            if [ -f "$RUNNER_TEMP/android-arm64-oiio/manifest.txt" ]; then
-              cat "$RUNNER_TEMP/android-arm64-oiio/manifest.txt"
-            else
-              echo "manifest.txt not found at artifact root"
-            fi
-          } 2>&1 | tee "$GITHUB_WORKSPACE/dependency-audit/package-inventory.txt"
-          echo "ANDROID_DEPS_PREFIX=$PREFIX" >> "$GITHUB_ENV"
-
-      # Download Blender source and learn the exact bundled Python version.
-      - name: Download Blender 5.2.2 source
-        run: |
-          set -eux
+          set -euxo pipefail
           mkdir -p "$GITHUB_WORKSPACE/blender-source"
           cd "$GITHUB_WORKSPACE/blender-source"
           curl -L --fail --retry 3 \
@@ -106,32 +52,27 @@ jobs:
 
       - name: Determine Blender Python version
         run: |
-          set -eux
+          set -euxo pipefail
           SOURCE="$GITHUB_WORKSPACE/blender-source/blender-${BLENDER_VERSION}"
           PYTHON_VERSION="$(sed -n \
             's/^set(PYTHON_VERSION[[:space:]]*\([0-9.]*\)).*/\1/p' \
             "$SOURCE/build_files/build_environment/cmake/versions.cmake" | head -1)"
-          if [ -z "$PYTHON_VERSION" ]; then
-            echo "ERROR: Could not determine Blender's Python version."
-            exit 1
-          fi
+          test -n "$PYTHON_VERSION"
           PYTHON_SHORT_VERSION="$(echo "$PYTHON_VERSION" | cut -d. -f1-2)"
-          echo "Blender Python: $PYTHON_VERSION (short: $PYTHON_SHORT_VERSION)"
           echo "PYTHON_VERSION=$PYTHON_VERSION" >> "$GITHUB_ENV"
           echo "PYTHON_SHORT_VERSION=$PYTHON_SHORT_VERSION" >> "$GITHUB_ENV"
+          echo "Blender requires Python $PYTHON_VERSION"
 
       - name: Clone matching CPython
         run: |
-          set -eux
-          cd "$GITHUB_WORKSPACE"
+          set -euxo pipefail
           git clone --depth 1 --branch "v${PYTHON_VERSION}" \
-            https://github.com/python/cpython.git cpython
-          test -f cpython/Android/android.py
-          test -f cpython/Android/README.md
+            https://github.com/python/cpython.git "$GITHUB_WORKSPACE/cpython"
+          test -f "$GITHUB_WORKSPACE/cpython/Android/android.py"
 
       - name: Build CPython host tools
         run: |
-          set -eux
+          set -euxo pipefail
           cd "$GITHUB_WORKSPACE/cpython"
           python3 Android/android.py configure-build
           python3 Android/android.py make-build
@@ -140,14 +81,14 @@ jobs:
 
       - name: Build CPython for Android ARM64
         run: |
-          set -eux
+          set -euxo pipefail
           cd "$GITHUB_WORKSPACE/cpython"
           python3 Android/android.py configure-host aarch64-linux-android
           python3 Android/android.py make-host aarch64-linux-android
 
       - name: Locate Android Python
         run: |
-          set -eux
+          set -euxo pipefail
           PREFIX="$GITHUB_WORKSPACE/cpython/cross-build/aarch64-linux-android/prefix"
           test -d "$PREFIX"
           PYTHON_HEADER="$(find "$PREFIX" -name Python.h -print -quit)"
@@ -157,26 +98,64 @@ jobs:
           test -n "$PYTHON_HEADER"
           test -n "$PYCONFIG_HEADER"
           test -n "$PYTHON_LIBRARY"
-          echo "ANDROID_PYTHON_PREFIX=$PREFIX" >> "$GITHUB_ENV"
           echo "PYTHON_INCLUDE_DIR=$(dirname "$PYTHON_HEADER")" >> "$GITHUB_ENV"
           echo "PYTHON_INCLUDE_CONFIG_DIR=$(dirname "$PYCONFIG_HEADER")" >> "$GITHUB_ENV"
           echo "PYTHON_LIBRARY=$PYTHON_LIBRARY" >> "$GITHUB_ENV"
           echo "PYTHON_LIBPATH=$(dirname "$PYTHON_LIBRARY")" >> "$GITHUB_ENV"
-          echo "Python header: $PYTHON_HEADER"
-          echo "Python config header: $PYCONFIG_HEADER"
-          echo "Python library: $PYTHON_LIBRARY"
+          echo "Android Python library: $PYTHON_LIBRARY"
 
-      # Copy the repository's Android platform scaffold into the downloaded
-      # Blender source, then add real package discovery before dependency_targets.cmake.
-      - name: Prepare Android platform configuration
+      # The previous OIIO artifact did not contain discoverable OpenEXR/OCIO
+      # package configs. Build one consistent target dependency set so that
+      # Blender does not mix unrelated OIIO and OpenEXR builds.
+      - name: Bootstrap vcpkg
         run: |
-          set -eux
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+          mkdir -p "$GITHUB_WORKSPACE/vcpkg-triplets"
+          cat > "$GITHUB_WORKSPACE/vcpkg-triplets/${VCPKG_TRIPLET}.cmake" <<'TRIPLET'
+          set(VCPKG_TARGET_ARCHITECTURE arm64)
+          set(VCPKG_CRT_LINKAGE dynamic)
+          set(VCPKG_LIBRARY_LINKAGE static)
+          set(VCPKG_CMAKE_SYSTEM_NAME Android)
+          set(VCPKG_CMAKE_SYSTEM_VERSION 29)
+          set(VCPKG_MAKE_BUILD_TRIPLET "--host=aarch64-linux-android")
+          set(VCPKG_CMAKE_CONFIGURE_OPTIONS
+              -DANDROID_ABI=arm64-v8a
+              -DANDROID_PLATFORM=android-29)
+          TRIPLET
+          echo "VCPKG_OVERLAY_TRIPLETS=$GITHUB_WORKSPACE/vcpkg-triplets" >> "$GITHUB_ENV"
+
+      - name: Build Android ARM64 image/color dependencies
+        run: |
+          set -euxo pipefail
+          export ANDROID_NDK_HOME="$ANDROID_NDK"
+          export ANDROID_NDK_ROOT="$ANDROID_NDK"
+          "$VCPKG_ROOT/vcpkg" install \
+            "openimageio[opencolorio,tools]:${VCPKG_TRIPLET}" \
+            --overlay-triplets="$GITHUB_WORKSPACE/vcpkg-triplets"
+          PREFIX="$VCPKG_ROOT/installed/${VCPKG_TRIPLET}"
+          test -d "$PREFIX"
+          echo "ANDROID_DEPS_PREFIX=$PREFIX" >> "$GITHUB_ENV"
+          echo "=== PACKAGE CONFIGS ==="
+          find "$PREFIX" -type f \
+            \( -iname 'OpenEXRConfig.cmake' \
+               -o -iname 'OpenColorIOConfig.cmake' \
+               -o -iname 'OpenImageIOConfig.cmake' \) -print | sort
+          test -n "$(find "$PREFIX" -type f -iname 'OpenEXRConfig.cmake' -print -quit)"
+          test -n "$(find "$PREFIX" -type f -iname 'OpenColorIOConfig.cmake' -print -quit)"
+          test -n "$(find "$PREFIX" -type f -iname 'OpenImageIOConfig.cmake' -print -quit)"
+
+      - name: Prepare temporary Android platform file
+        run: |
+          set -euxo pipefail
           SOURCE="$GITHUB_WORKSPACE/blender-source/blender-${BLENDER_VERSION}"
           OUR_FILE="$GITHUB_WORKSPACE/build_files/cmake/platform/platform_android.cmake"
           DEST="$SOURCE/build_files/cmake/platform/platform_android.cmake"
           test -f "$OUR_FILE"
           cp "$OUR_FILE" "$DEST"
-          cp "$DEST" "$GITHUB_WORKSPACE/dependency-audit/platform_android.cmake.original"
+          mkdir -p "$GITHUB_WORKSPACE/diagnostics"
+          cp "$DEST" "$GITHUB_WORKSPACE/diagnostics/platform_android.cmake.original"
           python3 - "$DEST" <<'PY'
           from pathlib import Path
           import sys
@@ -185,53 +164,43 @@ jobs:
           text = path.read_text()
           marker = 'message(STATUS "Blender Android platform configuration loaded successfully")'
           if text.count(marker) != 1:
-              raise SystemExit(
-                  "Expected exactly one Android platform success marker; "
-                  "refusing to patch an unknown platform file."
-              )
+              raise SystemExit("Expected one Android platform success marker; refusing to patch.")
 
-          package_setup = r'''# Find Android ARM64 dependency packages before Blender defines dependency aliases.
+          block = r'''# Discover the complete Android dependency set installed by vcpkg.
           if(NOT DEFINED ANDROID_DEPS_PREFIX OR NOT IS_DIRECTORY "${ANDROID_DEPS_PREFIX}")
-            message(FATAL_ERROR "ANDROID_DEPS_PREFIX is missing or invalid: '${ANDROID_DEPS_PREFIX}'")
+            message(FATAL_ERROR "ANDROID_DEPS_PREFIX is missing: '${ANDROID_DEPS_PREFIX}'")
           endif()
-
           list(PREPEND CMAKE_PREFIX_PATH "${ANDROID_DEPS_PREFIX}")
           set(OpenEXR_ROOT "${ANDROID_DEPS_PREFIX}" CACHE PATH "Android OpenEXR prefix" FORCE)
-          set(OpenImageIO_ROOT "${ANDROID_DEPS_PREFIX}" CACHE PATH "Android OpenImageIO prefix" FORCE)
           set(OpenColorIO_ROOT "${ANDROID_DEPS_PREFIX}" CACHE PATH "Android OpenColorIO prefix" FORCE)
+          set(OpenImageIO_ROOT "${ANDROID_DEPS_PREFIX}" CACHE PATH "Android OpenImageIO prefix" FORCE)
 
-          message(STATUS "Android dependency prefix: ${ANDROID_DEPS_PREFIX}")
           find_package(OpenEXR REQUIRED CONFIG)
-          find_package(OpenImageIO REQUIRED CONFIG)
           find_package(OpenColorIO 2.0.0 REQUIRED CONFIG)
+          find_package(OpenImageIO REQUIRED CONFIG)
 
-          if(NOT TARGET OpenEXR::OpenEXR)
-            message(FATAL_ERROR "OpenEXR package loaded but OpenEXR::OpenEXR target is missing")
-          endif()
-          if(NOT TARGET OpenImageIO::OpenImageIO)
-            message(FATAL_ERROR "OpenImageIO package loaded but OpenImageIO::OpenImageIO target is missing")
-          endif()
-          if(NOT TARGET OpenImageIO::oiiotool)
-            message(FATAL_ERROR "OpenImageIO::oiiotool target is missing; check whether OIIO tools were exported by the Android package")
-          endif()
-          if(NOT TARGET OpenColorIO::OpenColorIO)
-            message(FATAL_ERROR "OpenColorIO package loaded but OpenColorIO::OpenColorIO target is missing")
-          endif()
-          message(STATUS "Android OpenEXR, OpenImageIO, and OpenColorIO CMake targets are available")
+          foreach(required_target IN ITEMS
+              OpenEXR::OpenEXR
+              OpenColorIO::OpenColorIO
+              OpenImageIO::OpenImageIO
+              OpenImageIO::oiiotool)
+            if(NOT TARGET "${required_target}")
+              message(FATAL_ERROR "Required Android dependency target is missing: ${required_target}")
+            endif()
+          endforeach()
+          message(STATUS "Android OpenEXR, OpenColorIO, and OpenImageIO targets are available")
           '''
 
-          text = text.replace(marker, package_setup + "\n" + marker, 1)
-          path.write_text(text)
-          print("Added Android dependency package discovery and target checks.")
+          path.write_text(text.replace(marker, block + "\n" + marker, 1))
+          print("Patched temporary platform file with package discovery checks.")
           PY
-          cat "$DEST"
 
       - name: Patch Blender platform selection
         run: |
-          set -eux
+          set -euxo pipefail
           SOURCE="$GITHUB_WORKSPACE/blender-source/blender-${BLENDER_VERSION}"
           CMAKE_FILE="$SOURCE/CMakeLists.txt"
-          cp "$CMAKE_FILE" "$CMAKE_FILE.original"
+          cp "$CMAKE_FILE" "$GITHUB_WORKSPACE/diagnostics/CMakeLists.txt.original"
           python3 - "$CMAKE_FILE" <<'PY'
           from pathlib import Path
           import sys
@@ -241,7 +210,6 @@ jobs:
           target = "include(platform_unix)"
           replacement = "if(ANDROID)\n  include(platform_android)\nelse()\n  include(platform_unix)\nendif()"
           count = text.count(target)
-          print(f"Found include(platform_unix): {count}")
           if count != 1:
               raise SystemExit(f"Expected exactly one {target!r}, found {count}; refusing to patch.")
           path.write_text(text.replace(target, replacement, 1))
@@ -253,22 +221,25 @@ jobs:
           set -euxo pipefail
           SOURCE="$GITHUB_WORKSPACE/blender-source/blender-${BLENDER_VERSION}"
           BUILD="$GITHUB_WORKSPACE/build-android"
-          rm -rf "$BUILD"
-          mkdir -p "$BUILD"
-          cd "$BUILD"
           HOST_PYTHON="$GITHUB_WORKSPACE/cpython/cross-build/build/python"
           test -x "$HOST_PYTHON"
           test -d "$ANDROID_DEPS_PREFIX"
+          rm -rf "$BUILD"
+          mkdir -p "$BUILD"
+          cd "$BUILD"
           cmake -G Ninja \
-            -DCMAKE_SYSTEM_NAME=Android \
-            -DCMAKE_ANDROID_NDK="$ANDROID_NDK" \
-            -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a \
-            -DCMAKE_ANDROID_API="$ANDROID_API" \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
+            -DVCPKG_TARGET_TRIPLET="$VCPKG_TRIPLET" \
+            -DVCPKG_OVERLAY_TRIPLETS="$GITHUB_WORKSPACE/vcpkg-triplets" \
+            -DVCPKG_INSTALLED_DIR="$VCPKG_ROOT/installed" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-29 \
             -DANDROID_DEPS_PREFIX="$ANDROID_DEPS_PREFIX" \
             -DCMAKE_PREFIX_PATH="$ANDROID_DEPS_PREFIX" \
             -DOpenEXR_ROOT="$ANDROID_DEPS_PREFIX" \
-            -DOpenImageIO_ROOT="$ANDROID_DEPS_PREFIX" \
             -DOpenColorIO_ROOT="$ANDROID_DEPS_PREFIX" \
+            -DOpenImageIO_ROOT="$ANDROID_DEPS_PREFIX" \
             -DCMAKE_BUILD_TYPE=Release \
             -DPYTHON_VERSION="$PYTHON_SHORT_VERSION" \
             -DPYTHON_EXECUTABLE="$HOST_PYTHON" \
@@ -290,17 +261,20 @@ jobs:
       - name: Show configure summary
         if: always()
         run: |
+          set +e
           LOG="$GITHUB_WORKSPACE/build-android/cmake-android.log"
-          echo "=== CONFIGURE STATUS ==="
           if [ -f "$LOG" ]; then
-            grep -n -E \
-              'Configuring Blender for Android|Android dependency prefix|CMake Error|Could NOT find|NOTFOUND|OpenEXR|OpenImageIO|OpenColorIO|oiiotool|Vulkan|unsupported|Unsupported|error:' \
-              "$LOG" | tail -160 || true
+            grep -n -E 'CMake Error|Could NOT find|NOTFOUND|OpenEXR|OpenColorIO|OpenImageIO|oiiotool|Vulkan|unsupported|Unsupported|error:' "$LOG" | tail -160
             echo
-            echo "=== LAST 200 LOG LINES ==="
             tail -200 "$LOG"
           else
             echo "CMake log not created; an earlier step may have failed."
+          fi
+          echo
+          echo "=== DEPENDENCY PACKAGE CONFIGS ==="
+          PREFIX="$GITHUB_WORKSPACE/vcpkg/installed/arm64-android-api29"
+          if [ -d "$PREFIX" ]; then
+            find "$PREFIX" -type f \( -iname '*OpenEXR*Config*.cmake' -o -iname '*OpenColorIO*Config*.cmake' -o -iname '*OpenImageIO*Config*.cmake' \) -print | sort
           fi
 
       - name: Upload configure diagnostics
@@ -310,9 +284,8 @@ jobs:
           name: blender-5.2.2-android-configure-diagnostics
           path: |
             build-android/cmake-android.log
-            dependency-audit/package-inventory.txt
-            dependency-audit/platform_android.cmake.original
-            blender-source/blender-5.2.2/CMakeLists.txt.original
+            diagnostics/platform_android.cmake.original
+            diagnostics/CMakeLists.txt.original
             blender-source/blender-5.2.2/CMakeLists.txt
             blender-source/blender-5.2.2/build_files/cmake/platform/platform_android.cmake
           if-no-files-found: warn
