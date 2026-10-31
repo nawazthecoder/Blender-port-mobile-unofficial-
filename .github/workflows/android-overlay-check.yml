@@ -1,0 +1,26 @@
+name: Blender Android Source Overlay Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/apply_android_platform.py'
+      - 'tests/test_apply_android_platform.py'
+      - 'build_files/cmake/platform/platform_android.cmake'
+      - '.github/workflows/android-overlay-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  overlay:
+    name: Verify Blender source patch safety
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test source patching, idempotence and conflict detection
+        run: python -m unittest discover -s tests -v
