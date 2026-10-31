@@ -25,9 +25,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Ubuntu runners already include Android command-line tools. The
-      # setup-android@v3 action currently tries to install the removed
-      # SDK package 'tools' and fails before compilation.
+      # Set up ANDROID_HOME and sdkmanager without requesting the obsolete
+      # 'tools' package that older default configurations installed.
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+
       - name: Install SDK, NDK and CMake
         run: |
           set -euo pipefail
