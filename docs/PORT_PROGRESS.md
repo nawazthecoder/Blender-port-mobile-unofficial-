@@ -69,6 +69,10 @@ Run: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/ru
   signedness. This is an API check, not an Android link or device test.
 - Patch 4 applies after patches 1–3 and preserves official release metadata.
   Revision 4 native compilation/linking and APK packaging remain pending.
+  Run: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41321911101
+- Corrected the manual runtime smoke test to use the stable Python property
+  `bpy.app.build_options.fluid`; `mod_fluid` is not a Python build-options field.
+  All four referenced feature names were checked against the stable C API table.
 
 ## Resume procedure
 

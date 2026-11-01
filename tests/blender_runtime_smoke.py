@@ -11,7 +11,7 @@ import tempfile
 
 assert bpy.app.version[:3] == (5, 2, 3), bpy.app.version_string
 assert bpy.app.build_options.cycles
-assert bpy.app.build_options.mod_fluid
+assert bpy.app.build_options.fluid
 assert bpy.app.build_options.alembic
 assert bpy.app.build_options.usd
 out = Path(tempfile.mkdtemp(prefix='blender-android-smoke-', dir=bpy.app.tempdir))
