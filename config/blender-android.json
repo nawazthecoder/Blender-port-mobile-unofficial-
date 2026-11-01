@@ -15,6 +15,12 @@
   "vulkan_headers_version": "1.4.341",
   "android_min_api": 31,
   "configuration": "full",
-  "port_revision": 1,
-  "status": "source-backport-unverified"
+  "port_revision": 2,
+  "status": "cross-compilation-started-build-fixes-pending",
+  "additional_patches": [
+    {
+      "path": "patches/0002-stable-build-fixes.patch",
+      "sha256": "8f27482ada8f3a72d1bb117eaaeb68d7c65f8d14b6aabe18eaa33704bd066b37"
+    }
+  ]
 }

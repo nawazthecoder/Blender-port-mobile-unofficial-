@@ -31,6 +31,10 @@ jobs:
       ANDROID_NDK_VERSION: 30.0.16248370
       BLENDER_BUILD_JOBS: '2'
       CMAKE_BUILD_PARALLEL_LEVEL: '2'
+      CCACHE_DIR: ${{ github.workspace }}/ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 2G
     steps:
       - uses: actions/checkout@v4
         with:
@@ -53,7 +57,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build git-lfs patchelf clang-18 gcc-14 g++-14 unzip zip python3
+            cmake ninja-build git-lfs patchelf clang-18 gcc-14 g++-14 unzip zip python3 ccache
           df -h .
       - uses: android-actions/setup-android@v4
         with:
@@ -63,7 +67,23 @@ jobs:
           sdkmanager --channel=3 "ndk;$ANDROID_NDK_VERSION" \
             "platforms;android-35" "build-tools;35.0.1" "platform-tools"
           test -f "$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION/build/cmake/android.toolchain.cmake"
+      - name: Restore pinned library payloads
+        id: deps-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            blender-source/lib/linux_x64
+            blender-source/lib/android_arm64
+            blender-source/.git/modules/lib
+          key: android-libs-5.2.3-59001bef-v1
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ccache
+          key: android-ccache-r30-${{ github.sha }}
+          restore-keys: android-ccache-r30-
       - name: Fetch real host and target libraries, including LFS payloads
+        id: dependencies
         working-directory: blender-source
         run: bash ../user-repo/scripts/fetch_native_dependencies.sh
       - name: Install matching Vulkan headers
@@ -76,6 +96,7 @@ jobs:
           cp -R /tmp/vulkan-headers/Vulkan-Headers-1.4.341/include \
             blender_build_android/lib/vulkan_headers/include
       - name: Compile full Blender and package Android APK
+        id: compile
         working-directory: blender-source
         env:
           ANDROID_HOST_CC: clang-18
@@ -99,6 +120,21 @@ jobs:
           cp -R blender-source/release/license artifacts/licenses
           (cd artifacts && sha256sum blender-5.2.3-android-full.apk > SHA256SUMS)
           git -C blender-source diff --cached --binary > artifacts/corresponding-source.patch
+      - name: Save pinned library payloads after successful dependency verification
+        if: always() && steps.dependencies.outcome == 'success' && steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            blender-source/lib/linux_x64
+            blender-source/lib/android_arm64
+            blender-source/.git/modules/lib
+          key: android-libs-5.2.3-59001bef-v1
+      - name: Save compiler progress even after a compile failure
+        if: always() && steps.compile.outcome != 'skipped'
+        uses: actions/cache/save@v4
+        with:
+          path: ccache
+          key: android-ccache-r30-${{ github.sha }}
       - name: Preserve build diagnostics
         if: always()
         uses: actions/upload-artifact@v4

@@ -20,10 +20,12 @@ def run(*args, cwd=None, capture=False):
 
 def prepare(source, manifest_path=ROOT / 'config/blender-android.json'):
     manifest = json.loads(manifest_path.read_text())
-    patch = ROOT / manifest['patch']
-    digest = hashlib.sha256(patch.read_bytes()).hexdigest()
-    if digest != manifest['patch_sha256']:
-        raise ValueError('Android patch checksum does not match the source lock')
+    patches = [{'path': manifest['patch'], 'sha256': manifest['patch_sha256']}]
+    patches.extend(manifest.get('additional_patches', []))
+    for item in patches:
+        digest = hashlib.sha256((ROOT / item['path']).read_bytes()).hexdigest()
+        if digest != item['sha256']:
+            raise ValueError(f"Android patch checksum mismatch: {item['path']}")
     head = run('git', 'rev-parse', 'HEAD', cwd=source, capture=True).stdout.strip()
     if head != manifest['source_commit']:
         raise ValueError(f'Expected stable commit {manifest["source_commit"]}, got {head}')
@@ -36,8 +38,10 @@ def prepare(source, manifest_path=ROOT / 'config/blender-android.json'):
     found = f'{version // 100}.{version % 100}.{patch_version}'
     if found != manifest['blender_version'] or cycle != 'release':
         raise ValueError(f'Expected a stable release, found {found} {cycle}')
-    run('git', 'apply', '--check', str(patch), cwd=source)
-    run('git', 'apply', '--index', str(patch), cwd=source)
+    for item in patches:
+        patch = ROOT / item['path']
+        run('git', 'apply', '--check', str(patch), cwd=source)
+        run('git', 'apply', '--index', str(patch), cwd=source)
     if (source / 'source/blender/blenkernel/BKE_blender_version.h').read_text() != header:
         raise ValueError('Android patch must not relabel Blender version metadata')
     expected = manifest['android_libraries_commit']
