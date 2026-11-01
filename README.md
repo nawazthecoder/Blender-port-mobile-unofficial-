@@ -77,3 +77,13 @@ The native code and Android host added here are GPL-2.0-or-later; Blender
 and third-party components retain their original license obligations.
 See source-file headers and upstream Blender license terms when integrating
 Blender itself.
+
+## Actual Blender Android Vulkan editor
+
+The original Android app remains a lightweight **GPU diagnostic host**. For an
+**actual Blender modelling editor**, this repository now includes:
+
+- [Build Actual Blender Android Vulkan Editor](.github/workflows/real-blender-native.yml), a pinned-source C++/ARM64 compilation pipeline using Blender's real Android GHOST/Vulkan backend.
+- [Verify Native Blender Android Test APK](.github/workflows/real-blender-test-apk.yml), which SHA256-verifies and provides an **unmodified, GPL-attributed upstream Blender Android APK** for testing. This test APK is not compiled by this repository.
+
+See [native Blender build, requirements, provenance and current limits](docs/NATIVE_BLENDER_ANDROID.md).
