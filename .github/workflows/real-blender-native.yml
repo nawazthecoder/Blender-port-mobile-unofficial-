@@ -1,0 +1,110 @@
+name: Build Actual Blender Android Vulkan Editor
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/real-blender-native.yml']
+permissions:
+  contents: read
+jobs:
+  blender:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      GIT_LFS_SKIP_SMUDGE: '1'
+      GIT_TERMINAL_PROMPT: '0'
+      ANDROID_NDK_VERSION: 30.0.14904198-beta1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: user-repo
+      - uses: actions/checkout@v4
+        with:
+          repository: simfeo/blender
+          ref: 4bd0075178bdf71c9aa3de139af6d07e9da61b4d
+          path: blender-source
+          lfs: false
+          submodules: false
+          fetch-depth: 1
+      - name: Verify actual Android Blender sources
+        run: |
+          test "$(git -C blender-source rev-parse HEAD)" = "4bd0075178bdf71c9aa3de139af6d07e9da61b4d"
+          test -f blender-source/build_files/android/build_apk.sh
+          df -h .
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install host dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build git-lfs patchelf clang-18 gcc-14 g++-14 unzip zip python3
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - name: Install required Android NDK r30 beta
+        run: |
+          set -euo pipefail
+          sdkmanager --channel=3 "ndk;$ANDROID_NDK_VERSION" \
+            "platforms;android-35" "build-tools;35.0.1" "platform-tools"
+          test -f "$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION/build/cmake/android.toolchain.cmake"
+          if [ ! -e "$HOME/android-sdk" ]; then
+            ln -s "$ANDROID_HOME" "$HOME/android-sdk"
+          else
+            test "$HOME/android-sdk" -ef "$ANDROID_HOME"
+          fi
+      - name: Download corresponding Blender LFS and Android dependencies
+        working-directory: blender-source
+        run: |
+          set -euo pipefail
+          git lfs install --local
+          git config --local credential.https://projects.blender.org.helper \
+            '!f() { echo username=; echo password=; }; f'
+          git lfs pull
+          git submodule update --init --depth 1 lib/linux_x64 lib/android_arm64
+          test -d lib/android_arm64/python
+          test -d lib/linux_x64
+      - name: Install matching Vulkan headers
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 \
+            'https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.341.tar.gz' \
+            -o /tmp/vulkan-headers.tar.gz
+          mkdir -p /tmp/vulkan-headers
+          tar -xzf /tmp/vulkan-headers.tar.gz -C /tmp/vulkan-headers
+          mkdir -p blender_build_android/lib/vulkan_headers
+          cp -R /tmp/vulkan-headers/Vulkan-Headers-1.4.341/include \
+            blender_build_android/lib/vulkan_headers/include
+      - name: Cross-compile actual Blender C++ and package APK
+        working-directory: blender-source
+        env:
+          ANDROID_HOST_CC: clang-18
+          ANDROID_HOST_CXX: clang++-18
+        run: |
+          set -euo pipefail
+          bash build_files/android/build_apk.sh lite 2>&1 | tee build.log
+          test -s ../blender_build_android/build_android_lite/lib/libblender.so
+          apk=../blender_build_android/android_apk_stage_lite/blender-lite.apk
+          test -s "$apk"
+          unzip -Z1 "$apk" | grep -Fx 'lib/arm64-v8a/libblender.so'
+          mkdir -p ../artifacts
+          cp "$apk" ../artifacts/
+          sha256sum ../artifacts/blender-lite.apk > ../artifacts/SHA256SUMS
+          echo 'Corresponding GPL source: https://github.com/simfeo/blender/tree/4bd0075178bdf71c9aa3de139af6d07e9da61b4d' > ../artifacts/SOURCE.txt
+      - name: Upload logs on compile failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-blender-native-build-logs
+          path: blender-source/build.log
+          if-no-files-found: warn
+      - name: Upload actual Blender Vulkan APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: actual-blender-android-lite-arm64
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 7
