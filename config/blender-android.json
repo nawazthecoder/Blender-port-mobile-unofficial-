@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "blender_version": "5.2.3",
+  "release_cycle": "release",
+  "source_repository": "https://github.com/blender/blender.git",
+  "source_tag": "v5.2.3",
+  "source_commit": "e13b728c6880d3084d9d57c30031ed5df8b39dee",
+  "android_port_repository": "https://github.com/simfeo/blender.git",
+  "android_port_commit": "4bd0075178bdf71c9aa3de139af6d07e9da61b4d",
+  "android_port_base": "3bcf2d172c1f879561b600d02707617912d22c7d",
+  "patch": "patches/blender-5.2.3-android.patch",
+  "patch_sha256": "961051edc50f57d07f0dea13d43fb8b6b420643040e893050a7ccdfaf26e8314",
+  "android_libraries_commit": "59001bef2a4983d0f42e3281cf622a5734c1cb02",
+  "ndk_version": "30.0.16248370",
+  "vulkan_headers_version": "1.4.341",
+  "android_min_api": 31,
+  "configuration": "full",
+  "port_revision": 1,
+  "status": "source-backport-unverified"
+}
