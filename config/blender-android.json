@@ -15,8 +15,8 @@
   "vulkan_headers_version": "1.4.341",
   "android_min_api": 31,
   "configuration": "full",
-  "port_revision": 3,
-  "status": "compilation-reached-editor-touch-api-fix-pending",
+  "port_revision": 4,
+  "status": "all-but-keyboard-compiled-native-link-pending",
   "additional_patches": [
     {
       "path": "patches/0002-stable-build-fixes.patch",
@@ -25,6 +25,10 @@
     {
       "path": "patches/0003-stable-touch-api.patch",
       "sha256": "552d5aed5a28a09b0c715ede821451d9df675a52457108038b64993adac50e37"
+    },
+    {
+      "path": "patches/0004-stable-keyboard-headers.patch",
+      "sha256": "684a548555b33177a43e34c6ed1cc011ec996503f36526b0c40b94e279297937"
     }
   ]
 }

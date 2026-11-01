@@ -50,7 +50,25 @@ Run: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/ru
 - CI permits up to 20 failed Ninja commands to expose independent port errors
   in one run. Ninja still returns failure and no APK is packaged on failure.
 - Local patch preparation, 14 package/overlay unit tests, and shell syntax
-  checks pass. Native compilation of revision 3 is pending.
+  checks pass. Revision 3 fixed the touch UI compiler error.
+
+## Revision 4 keyboard backport
+
+Run: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41300813855
+
+- Revision 3 reached 7,381 of 7,383 Ninja steps. All scheduled translation units
+  except `wm_virtual_keyboard.cc` compiled, including the Vulkan backend. This
+  does not establish successful linking or Android runtime behavior.
+- The keyboard stopped at the first of eight headers renamed after Blender 5.2.
+  Restored their stable `.h` names, including `BLI_math_base.h` and
+  `BLI_math_vector.h`. The range-based list loops already work in stable 5.2
+  and are preserved.
+- The full keyboard translation unit passes local GCC 13 C++20 syntax checking
+  against actual stable Blender headers, fmt 12.1.0 and the official 5.2 host
+  OpenImageIO headers. Used `-funsigned-char` to match Android ARM64 character
+  signedness. This is an API check, not an Android link or device test.
+- Patch 4 applies after patches 1–3 and preserves official release metadata.
+  Revision 4 native compilation/linking and APK packaging remain pending.
 
 ## Resume procedure
 
