@@ -15,12 +15,16 @@
   "vulkan_headers_version": "1.4.341",
   "android_min_api": 31,
   "configuration": "full",
-  "port_revision": 2,
-  "status": "cross-compilation-started-build-fixes-pending",
+  "port_revision": 3,
+  "status": "compilation-reached-editor-touch-api-fix-pending",
   "additional_patches": [
     {
       "path": "patches/0002-stable-build-fixes.patch",
       "sha256": "8f27482ada8f3a72d1bb117eaaeb68d7c65f8d14b6aabe18eaa33704bd066b37"
+    },
+    {
+      "path": "patches/0003-stable-touch-api.patch",
+      "sha256": "552d5aed5a28a09b0c715ede821451d9df675a52457108038b64993adac50e37"
     }
   ]
 }

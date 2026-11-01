@@ -33,10 +33,24 @@ Run: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/ru
 - CI now runs these guards before the source build. New checkpoints queue behind
   an active build rather than cancelling expensive compilation.
 - Revision 2 build: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41296960629
-  Source preparation, library downloads, and toolchain installation passed;
-  native compilation was still running at this checkpoint.
+  Source preparation, library downloads, and toolchain installation passed.
+  The build reached 4,811 of 7,383 Ninja steps before a touch UI API error.
+  NDK r30 and Embree compiled successfully; compiler/dependency caches saved.
+  Run 41297287151 reproduced the same failure after successfully restoring caches.
 - Remaining review item: stable Vulkan clipping shaders need a complete mobile
   fallback, including geometry-stage paths, when shaderClipDistance is absent.
+
+## Revision 3 compiler fix
+
+- The Android popup touch handler called `uiblocks.first()`, a Blender 5.3
+  container API. Stable 5.2 stores this as `ListBase.first` (`void *`). Use the
+  same `static_cast<Block *>` access as the stable mouse handlers.
+- Searched the added patch lines for other `first()`, `last()`, and `is_empty()`
+  calls; this was the only added ListBase mismatch.
+- CI permits up to 20 failed Ninja commands to expose independent port errors
+  in one run. Ninja still returns failure and no APK is packaged on failure.
+- Local patch preparation, 14 package/overlay unit tests, and shell syntax
+  checks pass. Native compilation of revision 3 is pending.
 
 ## Resume procedure
 
