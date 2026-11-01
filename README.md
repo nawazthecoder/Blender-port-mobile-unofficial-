@@ -3,9 +3,9 @@
 Native Android ARM64 porting work targeting **Blender 5.2.3 LTS**, based on the
 actual stable release source. Not affiliated with the Blender Foundation.
 
-**Status: native compilation reached 7,381 of 7,383 build steps. The remaining
-keyboard compiler fix is pushed; final linking, APK validation and on-device
-execution are still pending. No completed full Android port is claimed.**
+**Status: all native C++ compilation passed. A Vulkan function-loading fix for
+the final Android link is pushed; APK validation and on-device execution remain
+pending. No completed full Android port is claimed.**
 
 The native build now applies the repository's Android patch to the exact official
 5.2.3 release commit. The source lock, patch and build scripts are committed here;

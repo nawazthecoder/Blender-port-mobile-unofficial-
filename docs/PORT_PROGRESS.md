@@ -74,6 +74,22 @@ Run: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/ru
   `bpy.app.build_options.fluid`; `mod_fluid` is not a Python build-options field.
   All four referenced feature names were checked against the stable C API table.
 
+## Revision 5 Vulkan link fix
+
+Run: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41321911101
+
+- Revision 4 compiled all native translation units, including the keyboard, and
+  reached the final `libblender.so` link (step 7,383/7,383).
+- The linker rejected direct imports of `vkGetDeviceBufferMemoryRequirements`,
+  `vkGetDeviceImageMemoryRequirements`, and
+  `vkGetPhysicalDeviceSurfaceCapabilities2KHR` from Android libvulkan.
+- Use VMA dynamic dispatch on Android and supply instance/device procedure
+  lookups when creating its allocator. Load the optional surface-capabilities
+  extension through `vkGetInstanceProcAddr`, with an explicit missing-entry check.
+- Local validation: VMA compiles to an object with no undefined Vulkan imports;
+  the modified GHOST Vulkan context passes host C++20 syntax checking. The next
+  Android link and package audit remain required.
+
 ## Resume procedure
 
 1. Read this file and `config/blender-android.json` from the current PR head.

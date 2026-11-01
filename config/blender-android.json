@@ -15,8 +15,8 @@
   "vulkan_headers_version": "1.4.341",
   "android_min_api": 31,
   "configuration": "full",
-  "port_revision": 4,
-  "status": "all-but-keyboard-compiled-native-link-pending",
+  "port_revision": 5,
+  "status": "native-compilation-passed-vulkan-link-fix-pending",
   "additional_patches": [
     {
       "path": "patches/0002-stable-build-fixes.patch",
@@ -29,6 +29,10 @@
     {
       "path": "patches/0004-stable-keyboard-headers.patch",
       "sha256": "684a548555b33177a43e34c6ed1cc011ec996503f36526b0c40b94e279297937"
+    },
+    {
+      "path": "patches/0005-android-vulkan-dispatch.patch",
+      "sha256": "8b2747292360db7e869d5bc6a0e1c8c1f38b01668c485a83157f84afa978bc0c"
     }
   ]
 }
