@@ -24,6 +24,20 @@ Run: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/ru
 - Cache verified dependencies and compiler output to retain expensive progress
   across failed attempts. No APK is uploaded after a failed compile/audit.
 
+## Package validation checkpoint
+
+- Fourteen local unit tests pass, including rejection of missing Blender/Python/
+  Cycles, host-architecture Python modules, unresolved shared libraries, missing
+  NativeActivity exports, and unresolved LFS asset pointers. These are synthetic
+  package tests, not evidence of Android execution.
+- CI now runs these guards before the source build. New checkpoints queue behind
+  an active build rather than cancelling expensive compilation.
+- Revision 2 build: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41296960629
+  Source preparation, library downloads, and toolchain installation passed;
+  native compilation was still running at this checkpoint.
+- Remaining review item: stable Vulkan clipping shaders need a complete mobile
+  fallback, including geometry-stage paths, when shaderClipDistance is absent.
+
 ## Resume procedure
 
 1. Read this file and `config/blender-android.json` from the current PR head.

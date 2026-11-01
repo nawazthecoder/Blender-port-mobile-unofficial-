@@ -12,6 +12,8 @@ import subprocess
 import tempfile
 import zipfile
 
+LFS_POINTER = b'version https://git-lfs.github.com/spec/v1'
+
 SYSTEM_LIBS = {'libc.so', 'libm.so', 'libdl.so', 'liblog.so', 'libandroid.so',
                'libvulkan.so', 'libz.so', 'libEGL.so', 'libGLESv2.so', 'libGLESv3.so',
                'libOpenSLES.so', 'libaaudio.so', 'libjnigraphics.so', 'libmediandk.so',
@@ -21,6 +23,8 @@ SYSTEM_LIBS = {'libc.so', 'libm.so', 'libdl.so', 'liblog.so', 'libandroid.so',
 def audit(apk, readelf, full=True):
     with zipfile.ZipFile(apk) as archive, tempfile.TemporaryDirectory() as temp:
         names = set(archive.namelist())
+        if len(names) != len(archive.namelist()):
+            raise ValueError('APK contains duplicate archive paths')
         for required in ('AndroidManifest.xml', 'classes.dex', 'lib/arm64-v8a/libblender.so',
                          'lib/arm64-v8a/libc++_shared.so', 'assets/blender_runtime.zip'):
             if required not in names:
@@ -29,6 +33,12 @@ def audit(apk, readelf, full=True):
         runtime_data = archive.read('assets/blender_runtime.zip')
         with zipfile.ZipFile(io.BytesIO(runtime_data)) as runtime:
             files = set(runtime.namelist())
+            if len(files) != len(runtime.namelist()):
+                raise ValueError('Runtime contains duplicate archive paths')
+            for entry in runtime.infolist():
+                if not entry.is_dir() and entry.file_size <= 1024:
+                    if runtime.read(entry).startswith(LFS_POINTER):
+                        raise ValueError(f'Unresolved Git LFS pointer in runtime: {entry.filename}')
             for prefix in ('scripts/startup/', 'scripts/modules/', 'datafiles/', 'python/lib/'):
                 if not any(n.startswith(prefix) for n in files):
                     raise ValueError(f'Missing runtime payload: {prefix}')

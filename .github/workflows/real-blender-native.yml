@@ -20,7 +20,8 @@ permissions:
   contents: read
 concurrency:
   group: blender-stable-android-${{ github.ref }}
-  cancel-in-progress: true
+  # Preserve expensive compiler work while newer checkpoints queue.
+  cancel-in-progress: false
 jobs:
   blender:
     runs-on: ubuntu-24.04
@@ -47,6 +48,9 @@ jobs:
           lfs: false
           submodules: false
           fetch-depth: 1
+      - name: Test preparation and package guards
+        working-directory: user-repo
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
       - name: Prepare locked stable Blender and Android backport
         run: python3 user-repo/scripts/prepare_stable_android.py blender-source
       - uses: actions/setup-java@v4
