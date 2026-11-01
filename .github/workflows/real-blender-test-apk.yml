@@ -1,0 +1,43 @@
+name: Verify Native Blender Android Test APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/real-blender-test-apk.yml']
+permissions:
+  contents: read
+jobs:
+  test-actual-editor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download GPL Android Blender editor and verify SHA256
+        env:
+          URL: https://github.com/simfeo/blender/releases/download/android-alpha-4/blender-lite.apk
+          SHA256: 5d05835e52377c7d987145b6c35a944804c88e32e114fd53ede4c36edea20ce1
+        run: |
+          set -euo pipefail
+          mkdir -p verified-native-apk
+          curl --fail --location --retry 3 --retry-delay 5 --connect-timeout 25 \
+            "$URL" -o verified-native-apk/blender-lite.apk
+          echo "$SHA256  verified-native-apk/blender-lite.apk" | sha256sum --check
+          test "$(stat -c%s verified-native-apk/blender-lite.apk)" -gt 100000000
+          unzip -Z1 verified-native-apk/blender-lite.apk \
+            | grep -Fx 'lib/arm64-v8a/libblender.so'
+          cat > verified-native-apk/README.txt <<'NOTICE'
+          This is an unmodified APK from the simfeo/blender Android port.
+          Blender and this Android port are licensed under GPL; original
+          authors, source and notices: https://github.com/simfeo/blender
+          Release: https://github.com/simfeo/blender/releases/tag/android-alpha-4
+          SHA256: 5d05835e52377c7d987145b6c35a944804c88e32e114fd53ede4c36edea20ce1
+          This APK was NOT compiled in nawazthecoder's repository.
+          The separate Build Actual Blender Android Vulkan Editor workflow
+          attempts a fresh compilation from pinned source.
+          NOTICE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: actual-blender-android-upstream-lite-verification
+          path: verified-native-apk/
+          if-no-files-found: error
+          retention-days: 7
