@@ -13,7 +13,7 @@ jobs:
     env:
       GIT_LFS_SKIP_SMUDGE: '1'
       GIT_TERMINAL_PROMPT: '0'
-      ANDROID_NDK_VERSION: 30.0.14904198-beta1
+      ANDROID_NDK_VERSION: 30.0.16248370
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,7 +44,7 @@ jobs:
       - uses: android-actions/setup-android@v4
         with:
           packages: ''
-      - name: Install required Android NDK r30 beta
+      - name: Install stable Android NDK r30
         run: |
           set -euo pipefail
           sdkmanager --channel=3 "ndk;$ANDROID_NDK_VERSION" \
