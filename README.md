@@ -3,13 +3,16 @@
 Native Android ARM64 porting work targeting **Blender 5.2.3 LTS**, based on the
 actual stable release source. Not affiliated with the Blender Foundation.
 
-**Status: full native build, APK packaging and runtime asset checks pass.
-The packager now collects native add-on dependencies; its final package audit
-and on-device execution remain pending.**
+**Status: full native build, APK packaging, runtime asset checks, ARM64 native
+dependency audit and Android signature verification pass. On-device startup
+and rendering still need testing.**
 
 The native build now applies the repository's Android patch to the exact official
 5.2.3 release commit. The source lock, patch and build scripts are committed here;
 the build does not rename a 5.3 alpha binary or substitute a diagnostic renderer.
+
+Validated build: [revision 7 workflow](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41408648885).
+The full ARM64 APK is available in its `blender-5.2.3-android-full-arm64` artifact.
 
 ## Build the full editor
 

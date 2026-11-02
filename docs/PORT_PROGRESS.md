@@ -122,6 +122,23 @@ Run: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/ru
   versioned SONAME correctly. The same check runs before the expensive CI build.
 - Final Android package validation and device execution remain required.
 
+## Successful package checkpoint — revision 7
+
+- Workflow passed: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41408648885
+- Validated implementation: `e24c84bda8375d1c3dd015f986e1b049223c2107`.
+- Full Android native compilation/linking, APK packaging, all runtime source
+  payloads, ELF architecture/dependency audit, and Android v3 signing passed.
+- Artifact: `blender-5.2.3-android-full-arm64`, ID `13124204862`.
+- APK: `5.2.3-android.7`, 283,068,031 bytes, 149 packaged native libraries.
+- SHA256: `d847c96dd95b83402e6c1dbd76139e8c057fb29291970509648b92801ccfc5f5`.
+- Downloaded the artifact and confirmed the APK hash matches its CI audit.
+- Sixteen unit tests and the real host-ELF collection regression check passed.
+- This checkpoint only updates documentation/status and deliberately skips CI;
+  the implementation and seven source patches are unchanged from the passed run.
+- Next: validate startup, editing, save/reload, CPU Cycles rendering, Vulkan
+  viewports and lifecycle on actual Android hardware. Device behavior and the
+  documented mobile clipping fallback remain unverified.
+
 ## Resume procedure
 
 1. Read this file and `config/blender-android.json` from the current PR head.
