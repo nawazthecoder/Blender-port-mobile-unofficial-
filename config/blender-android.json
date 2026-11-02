@@ -15,8 +15,8 @@
   "vulkan_headers_version": "1.4.341",
   "android_min_api": 31,
   "configuration": "full",
-  "port_revision": 5,
-  "status": "native-compilation-passed-vulkan-link-fix-pending",
+  "port_revision": 6,
+  "status": "native-build-and-packaging-passed-runtime-asset-fix-pending",
   "additional_patches": [
     {
       "path": "patches/0002-stable-build-fixes.patch",
@@ -33,6 +33,10 @@
     {
       "path": "patches/0005-android-vulkan-dispatch.patch",
       "sha256": "8b2747292360db7e869d5bc6a0e1c8c1f38b01668c485a83157f84afa978bc0c"
+    },
+    {
+      "path": "patches/0006-runtime-payload-revision.patch",
+      "sha256": "8d1fb3f4ce2f2a355e5016f1114893b26c2a4e6b9462d1da487bd486a87eb31f"
     }
   ]
 }

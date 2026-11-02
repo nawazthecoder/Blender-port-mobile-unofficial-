@@ -5,8 +5,24 @@ set -euo pipefail
 git lfs install --local
 git config --local lfs.url https://projects.blender.org/blender/blender.git/info/lfs
 git config --local credential.https://projects.blender.org.helper '!f() { echo username=; echo password=; }; f'
-# Skip test fixtures: these are not needed by the editor and consume several GB.
-git lfs pull --include='assets/**,release/**' --exclude='tests/**'
+# Match every source directory copied into the APK runtime, including the .blend
+# startup files shipped with application templates under scripts/.
+# Test fixtures are not part of the editor and consume several GB.
+git lfs pull --include='assets/**,release/**,scripts/**,locale/**' --exclude='tests/**'
+python3 - <<'PY'
+from pathlib import Path
+pointer = b'version https://git-lfs.github.com/spec/v1'
+missing = []
+for directory in ('assets', 'release/datafiles', 'scripts', 'locale'):
+    for path in Path(directory).rglob('*'):
+        if path.is_file():
+            with path.open('rb') as stream:
+                if stream.read(len(pointer)) == pointer:
+                    missing.append(str(path))
+if missing:
+    raise SystemExit('Unresolved runtime Git LFS payloads:\n' + '\n'.join(sorted(missing)))
+print('Runtime source payloads verified (assets, datafiles, scripts, locale)')
+PY
 # .gitmodules intentionally sets update=none for desktop libs. Override it.
 GIT_LFS_SKIP_SMUDGE=1 git -c submodule.lib/linux_x64.update=checkout \
   submodule update --init --checkout --depth 1 lib/linux_x64 lib/android_arm64

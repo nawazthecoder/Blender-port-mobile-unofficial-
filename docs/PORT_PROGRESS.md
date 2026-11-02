@@ -1,4 +1,4 @@
-# Blender Android port checkpoint — 1 November 2026
+# Blender Android port checkpoint — 2 November 2026
 
 Work is preserved on `codex/blender-5.2.3-full-android`, PR #1. Do not treat
 this checkpoint as a successful APK build or device test.
@@ -89,6 +89,23 @@ Run: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/ru
 - Local validation: VMA compiles to an object with no undefined Vulkan imports;
   the modified GHOST Vulkan context passes host C++20 syntax checking. The next
   Android link and package audit remain required.
+
+## Revision 6 runtime asset fix
+
+Run: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41322731665
+
+- Revision 5 compiled and linked the full Android native editor, assembled its
+  runtime, and packaged the APK successfully. The Vulkan linker fixes worked.
+- The separate package audit rejected an unresolved Git LFS pointer at
+  `scripts/startup/bl_app_templates_system/Storyboarding/startup.blend`.
+- Fetch source LFS payloads under `scripts/**` and `locale/**` in addition to
+  `assets/**` and `release/**`. Tests remain excluded.
+- Check every packaged source directory for remaining pointers immediately after
+  fetching, before native compilation starts. Keep the final APK pointer check.
+- Sixteen local unit tests pass. The new integration tests reproduce application
+  template fetching and prove unresolved templates fail before compilation.
+- Revision 6 changes the APK version label to identify the asset-corrected build.
+  Final package validation and real-device execution remain unverified.
 
 ## Resume procedure
 

@@ -120,6 +120,7 @@ jobs:
             --report artifacts/package-audit.json
           "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose artifacts/blender-5.2.3-android-full.apk
           cp user-repo/config/blender-android.json artifacts/source-lock.json
+          git -C user-repo rev-parse HEAD > artifacts/port-repository-commit.txt
           cp user-repo/docs/NATIVE_BLENDER_ANDROID.md artifacts/SOURCE-AND-STATUS.md
           cp user-repo/tests/blender_runtime_smoke.py artifacts/
           cp -R blender-source/release/license artifacts/licenses
