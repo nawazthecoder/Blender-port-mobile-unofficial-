@@ -107,6 +107,21 @@ Run: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/ru
 - Revision 6 changes the APK version label to identify the asset-corrected build.
   Final package validation and real-device execution remain unverified.
 
+## Revision 7 native add-on dependencies
+
+Run: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41407273106
+
+- Revision 6 passed the early runtime source check, rebuilt the native editor,
+  and packaged the APK. The final audit passed the LFS checks, then found
+  `libdraco.so` missing from the glTF Draco bridge dependency chain.
+- Seed native dependency collection from all payload modules, including add-on
+  bridges and USD plugins, rather than only Python modules. Include versioned
+  `.so.*` files and normalize runtime module dependencies consistently.
+- A host ELF smoke check reproduces the omission with the old packager. The
+  revised packager collects the add-on codec, a transitive library, and a
+  versioned SONAME correctly. The same check runs before the expensive CI build.
+- Final Android package validation and device execution remain required.
+
 ## Resume procedure
 
 1. Read this file and `config/blender-android.json` from the current PR head.

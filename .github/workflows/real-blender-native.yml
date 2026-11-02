@@ -64,6 +64,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake ninja-build git-lfs patchelf clang-18 gcc-14 g++-14 unzip zip python3 ccache
           df -h .
+      - name: Check native add-on dependency collection
+        run: python3 user-repo/tests/native_library_collection_smoke.py blender-source
       - uses: android-actions/setup-android@v4
         with:
           packages: ''
