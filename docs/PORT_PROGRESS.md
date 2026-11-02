@@ -139,6 +139,25 @@ Run: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/ru
   viewports and lifecycle on actual Android hardware. Device behavior and the
   documented mobile clipping fallback remain unverified.
 
+## Device feedback and revision 8 graphics preferences
+
+- The user reports that revision 7 launches and displays Blender on their phone.
+  This confirms user-observed startup; rendering, save/reload and lifecycle are
+  not established by that report.
+- They also report the popup saying Vulkan failed and OpenGL is being used.
+  Source inspection found the reverse: desktop preferences request OpenGL,
+  which is not compiled into Android, then detection selects Vulkan. The shared
+  popup is hardcoded for a desktop Vulkan-to-OpenGL fallback.
+- Revision 8 converts unsupported OpenGL/Metal preferences to Vulkan on Android
+  before selection. Explicit launch overrides keep their priority. Capability
+  requirements are unchanged. The Android popup reports the active backend.
+- A local C++ check reproduced the old preference choice and validated the new
+  Android selection, explicit overrides, and unchanged desktop preference logic.
+  Native compilation/package checks for revision 8 remain pending.
+- The texture-paint warning matches the stock missing-image/linked-data check;
+  no evidence yet establishes a texture-paint renderer defect. Instructions are
+  in `docs/ANDROID_TROUBLESHOOTING.md`.
+
 ## Resume procedure
 
 1. Read this file and `config/blender-android.json` from the current PR head.

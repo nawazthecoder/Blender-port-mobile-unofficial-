@@ -15,8 +15,8 @@
   "vulkan_headers_version": "1.4.341",
   "android_min_api": 31,
   "configuration": "full",
-  "port_revision": 7,
-  "status": "package-validated-device-testing-pending",
+  "port_revision": 8,
+  "status": "revision7-device-startup-confirmed-graphics-preference-fix-pending",
   "additional_patches": [
     {
       "path": "patches/0002-stable-build-fixes.patch",
@@ -41,6 +41,10 @@
     {
       "path": "patches/0007-native-addon-dependencies.patch",
       "sha256": "baa9b7a577a5e88b66c7a3091fe823dd0dd4b7f637c760286df5c8fa5970d337"
+    },
+    {
+      "path": "patches/0008-android-graphics-preferences.patch",
+      "sha256": "6c5688a1b1b378741c86e40370b2ba546ab59fdb8e8d2a67522d4db58a723321"
     }
   ]
 }

@@ -4,8 +4,8 @@ Native Android ARM64 porting work targeting **Blender 5.2.3 LTS**, based on the
 actual stable release source. Not affiliated with the Blender Foundation.
 
 **Status: full native build, APK packaging, runtime asset checks, ARM64 native
-dependency audit and Android signature verification pass. On-device startup
-and rendering still need testing.**
+dependency audit and Android signature verification pass. The user confirms
+revision 7 launches on their phone; individual features still need testing.**
 
 The native build now applies the repository's Android patch to the exact official
 5.2.3 release commit. The source lock, patch and build scripts are committed here;
@@ -26,6 +26,7 @@ A successful run must compile `libblender.so`, package the real Blender runtime,
 pass the ARM64 ELF and dependency audit, and pass Android signature verification
 before uploading `blender-5.2.3-android-full-arm64`.
 
+- [Graphics/texture-paint troubleshooting](docs/ANDROID_TROUBLESHOOTING.md)
 - [Latest checkpoint and resume instructions](docs/PORT_PROGRESS.md)
 - [Source/version lock](config/blender-android.json)
 - [Android backport patch](patches/blender-5.2.3-android.patch)
