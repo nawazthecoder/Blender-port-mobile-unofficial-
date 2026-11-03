@@ -1,49 +1,76 @@
-# Android virtual mouse (revision 9)
+# Android virtual mouse (revision 10)
 
-Install the new **Blender Android** app. It uses package `org.blender.androidport`
-so it can sit alongside the working revision 7 **Blender** app. Save your work in
-shared storage before testing and open those files in the new app. Settings and
-app-private files belong to each app separately. Do not uninstall the working app
-just to try this build. The Java activity retains its original fully qualified
-class name for native JNI compatibility.
+Install revision 10 over **Blender Android** revision 9. It keeps the same
+`org.blender.androidport` application ID and the CI development signing identity.
+The separate revision 7 **Blender** app can remain installed. Save your work before
+updating; uninstalling the app is not part of the update procedure.
 
 Tap **MOUSE** beside **KEYBOARD** on the bottom status bar. If the status bar is
 hidden, use operator search (F3) and choose **Toggle Virtual Mouse**.
 
-- Swipe outside the controls to move the arrow; lifting your finger keeps its position.
-- Tap **Left**, **Middle**, or **Right** to click at the arrow tip. A short tap on
-  the touchpad also clicks the left button. Swiping does not click.
-- For a one-finger drag, tap **Hold**, then a mouse button. It stays held while
-  you swipe. Tap **Release**, or that same button, to finish. Holding Middle lets
-  you orbit the viewport; a latched Shift key on the virtual keyboard adds pan.
-- You can also keep a finger on a mouse button and move another finger to drag.
-- Use **Wheel - / Wheel +**, or move two fingers vertically together, to scroll
-  or zoom at the pointer. The existing touch orbit/pinch gestures are replaced
-  while mouse mode is active.
-- Drag **Move** to reposition the control strip. The strip avoids the open
-  virtual keyboard, whose keys still respond to direct touches. While the keyboard
-  is open, the pointer stays in the visible editor area so drag releases cannot
-  be swallowed by a key.
-- Tap **Close** or **MOUSE** to return to direct touch. A physical mouse or stylus
-  switches off virtual mouse mode automatically and keeps its existing input behavior.
+| Gesture in mouse mode | Action |
+| --- | --- |
+| One-finger swipe | Move the pointer; lifting leaves it in place |
+| Single short tap | Left click at the pointer |
+| Two quick taps with one finger | Right click, without a preceding left click |
+| Two-finger quick tap | Right click as an alternative |
+| Two fingers held or dragged together | Hold Middle and move; lift a finger to release |
+| Three fingers moved vertically | Wheel scrolling / zooming in either direction |
 
-Held buttons are released on cancel, app focus loss, surface loss, rotation, and
-when mouse mode closes. Closing the strip consumes the remainder of that touch
-so it cannot click the Blender editor underneath.
+Pad taps briefly wait up to 240 ms to distinguish a single tap from a double tap.
+Movement has no recognition delay or smoothing filter. The **Left / Middle /
+Right** buttons click immediately, including when double-clicking with Left.
+
+For one-finger dragging, tap **Hold**, then a mouse button. It stays held while
+you swipe. Tap **Release**, or the same button, to finish. You can also keep one
+finger on a button and move another finger. Explicit held buttons take priority
+over the automatic gestures. A latched Shift key on the virtual keyboard plus
+Middle pans the viewport. **Wheel - / Wheel +** remain available.
+
+The two-finger hold starts after 180 ms, or immediately when a drag moves past
+touch slop. Adding a third finger releases Middle before scrolling. After any
+finger in a multi-finger gesture lifts, the remaining fingers cannot accidentally
+start another drag or click; lift them all to begin the next gesture.
+
+Drag **Move** to reposition the control strip. It avoids the open virtual keyboard,
+whose keys still respond to direct touches. The pointer stays in the visible
+editor area while the keyboard is open so keys cannot swallow a drag release.
+Tap **Close** to return to direct touch. A physical mouse or stylus automatically
+switches off virtual mouse mode.
+
+Held buttons and pending taps are cancelled on focus loss, surface loss, rotation,
+cancellation, and when mouse mode closes. Closing the strip consumes the rest of
+that touch stream to prevent click-through.
+
+## Visibility and responsiveness
+
+The pointer is now drawn after floating menus, gestures, drag previews and Blender's
+software cursor. Opening an options menu no longer places it over the arrow.
+The control strip remains in its normal window overlay layer.
+
+Virtual touch movement no longer posts full-window `NC_WINDOW` refresh requests.
+Only the window composition is marked dirty when pointer or control state changes;
+existing region buffers can be reused. Idle state does not request redraws.
+Hover events are collapsed to the newest position before each Blender iteration,
+with button/wheel boundaries flushed in order. Every movement sample is retained
+while a mouse button is held, preserving paint strokes and drags. This addresses
+unnecessary redraw work and stale hover backlogs; phone FPS and latency still need
+measurement on the user's device.
 
 ## Validation
 
-The real controller is exercised by `tests/android_virtual_mouse_smoke.py` with
-AddressSanitizer and UndefinedBehaviorSanitizer. Tests cover click coordinates,
-relative motion, latched left/middle/right drags, reordered touch IDs, two-finger
-scrolling, keyboard exclusion, moving the strip, and releasing interrupted input.
-Full native compilation, APK identity, v3 signatures, ELF dependency closure and
-runtime payload checks passed in [workflow 41582692540](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41582692540).
-Phone validation of this new mode
-remains pending; revision 7 startup was confirmed separately by the user.
+`tests/android_virtual_mouse_smoke.py` runs the actual controller and event queue
+with AddressSanitizer and UndefinedBehaviorSanitizer. Coverage includes click
+timing and coordinates, double-tap suppression of Left, two-finger Middle holds
+and drags, three-finger scrolling both ways, gesture transitions, interrupted
+input, keyboard exclusion, toolbar controls, a 10,000-event hover burst, ordered
+button/wheel events, and preserved held-button movement samples.
 
-The CI development signing key is cached under `android-port-development-signing-v1`
-so later builds can update this new app while that cache is retained. It is a
-public development identity, not a production signing secret. Revision 7 was
-signed with a different ephemeral key; its private key was not preserved, which
-is why this build uses a separate application ID.
+Revision 9 passed native compilation, package identity, dependency/payload audits
+and v3 signature checks in [workflow 41582692540](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41582692540).
+The user reports using it on their phone and identified menu occlusion and pointer
+lag. Revision 10's native build and phone verification are pending.
+
+The CI development key is cached under `android-port-development-signing-v1`;
+future update compatibility depends on retaining this key. The Java activity's
+fully qualified original class name is preserved for JNI compatibility.

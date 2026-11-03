@@ -1,0 +1,605 @@
+diff --git a/build_files/android/apk/app/build.gradle b/build_files/android/apk/app/build.gradle
+index 2355a548..563e2916 100644
+--- a/build_files/android/apk/app/build.gradle
++++ b/build_files/android/apk/app/build.gradle
+@@ -24,8 +24,8 @@ android {
+     applicationId 'org.blender.androidport'
+     minSdk 31
+     targetSdk 34
+-    versionCode 5020309
+-    versionName '5.2.3-android.9'
++    versionCode 5020310
++    versionName '5.2.3-android.10'
+     ndk { abiFilters 'arm64-v8a' }
+   }
+ 
+diff --git a/build_files/android/apk/package.sh b/build_files/android/apk/package.sh
+index bc5a6e2c..10703e0d 100755
+--- a/build_files/android/apk/package.sh
++++ b/build_files/android/apk/package.sh
+@@ -378,7 +378,7 @@ fi
+   "$STAGE/rescompiled/res.zip" \
+   -A "$ASSETS" -0 zip \
+   --min-sdk-version "$ANDROID_API" --target-sdk-version "$ANDROID_TARGET_API" \
+-  --version-code 5020309 --version-name "5.2.3-android.9"
++  --version-code 5020310 --version-name "5.2.3-android.10"
+ 
+ echo "[apk] assembling"
+ cp "$STAGE/base.apk" "$OUT"
+diff --git a/intern/ghost/GHOST_AndroidVirtualMouse.hh b/intern/ghost/GHOST_AndroidVirtualMouse.hh
+index d3666979..93bf68f6 100644
+--- a/intern/ghost/GHOST_AndroidVirtualMouse.hh
++++ b/intern/ghost/GHOST_AndroidVirtualMouse.hh
+@@ -44,6 +44,42 @@ struct State {
+   std::array<Rect, ControlCount> controls;
+ };
+ 
++/* Bound hover backlog to one position per Blender iteration. Button/wheel boundaries flush
++ * that position first; held-button paths retain every sample for painting and dragging. */
++class EventQueue {
++ public:
++  explicit EventQueue(std::function<void(const Event &)> emit) : emit_(std::move(emit)) {}
++  void push(const Event &event)
++  {
++    if (event.kind == Kind::Motion && held_ == 0) {
++      pending_ = event;
++      has_pending_ = true;
++      return;
++    }
++    flush();
++    if (event.kind == Kind::ButtonDown) {
++      held_ |= event.button;
++    }
++    else if (event.kind == Kind::ButtonUp) {
++      held_ &= ~event.button;
++    }
++    emit_(event);
++  }
++  void flush()
++  {
++    if (has_pending_) {
++      has_pending_ = false;
++      emit_(pending_);
++    }
++  }
++
++ private:
++  std::function<void(const Event &)> emit_;
++  Event pending_{Kind::Motion, 0, 0};
++  bool has_pending_ = false;
++  int held_ = 0;
++};
++
+ class Controller {
+  public:
+   explicit Controller(std::function<void(const Event &)> emit) : emit_(std::move(emit)) {}
+@@ -128,23 +164,55 @@ class Controller {
+     touches_ = {};
+     state_.latched = 0;
+     state_.hold_armed = false;
++    middle_gesture_ = false;
++    pending_tap_ = second_tap_ = false;
++    chord_max_ = 0;
++    chord_tap_ = false;
++    chord_lifted_ = false;
+     sync_buttons();
+     wheel_remainder_ = 0;
+     suppressed_ = captured_ && keep_capture;
+     captured_ = suppressed_;
+   }
++  /* Only pad taps wait for double-tap recognition. Pointer motion and toolbar clicks never wait. */
++  void tick(uint64_t time)
++  {
++    if (pending_tap_ && ((!second_tap_ && time >= tap_deadline_) ||
++                         (second_tap_ && time >= second_deadline_)))
++    {
++      flush_tap();
++    }
++    if (captured_ && !suppressed_ && !chord_lifted_ && pad_count() == 2 &&
++        manual_buttons() == 0 && !middle_gesture_ && time >= chord_started_ + 180)
++    {
++      start_middle();
++    }
++  }
+   bool begin(int id, float x, float y, uint64_t time)
+   {
++    tick(time);
+     if (captured_) {
+       cancel();
+     }
+     touches_ = {};
++    chord_max_ = 0;
++    chord_tap_ = true;
++    chord_lifted_ = false;
+     wheel_remainder_ = 0;
++    second_tap_ = pending_tap_ && time < tap_deadline_ &&
++                  std::hypot(x - tap_touch_x_, y - tap_touch_y_) <= 24 * state_.scale &&
++                  std::hypot(state_.x - tap_x_, state_.y - tap_y_) <= 6 * state_.scale &&
++                  !keyboard_.contains(x, y) && !state_.panel.contains(x, y);
++    if (pending_tap_ && !second_tap_) {
++      flush_tap();
++    }
+     if (!state_.enabled || keyboard_.contains(x, y)) {
+       return false;
+     }
++    second_deadline_ = time + 300;
+     captured_ = true;
+     add(id, x, y, time);
++    chord_max_ = pad_count();
+     return true;
+   }
+   void pointer_down(int id, float x, float y, uint64_t time)
+@@ -152,6 +220,8 @@ class Controller {
+     if (!captured_ || suppressed_) {
+       return;
+     }
++    tick(time);
++    flush_tap();
+     for (Touch &touch : touches_) {
+       touch.tap = false;
+     }
+@@ -159,6 +229,17 @@ class Controller {
+     for (Touch &touch : touches_) {
+       touch.tap = false;
+     }
++    const int pads = pad_count();
++    if (pads == 2 && chord_max_ < 2) {
++      chord_started_ = time;
++      chord_tap_ = manual_buttons() == 0;
++    }
++    chord_max_ = std::max(chord_max_, pads);
++    if (pads >= 3) {
++      chord_tap_ = false;
++      middle_gesture_ = false;
++      sync_buttons(); /* Release orbit before starting a three-finger scroll. */
++    }
+     wheel_remainder_ = 0;
+   }
+   void move(const Point *points, int count)
+@@ -167,8 +248,8 @@ class Controller {
+       return;
+     }
+     int pads = 0;
+-    float dx = 0, dy = 0;
+-    bool primary = false;
++    float dx = 0, dy = 0, first_dx = 0, first_dy = 0;
++    bool moved = false;
+     for (Touch &touch : touches_) {
+       if (!touch.active) {
+         continue;
+@@ -181,17 +262,20 @@ class Controller {
+         const float my = points[i].y - touch.y;
+         touch.x = points[i].x;
+         touch.y = points[i].y;
+-        if (std::hypot(touch.x - touch.start_x, touch.y - touch.start_y) > 6 * state_.scale) {
++        const bool past_slop = std::hypot(touch.x - touch.start_x,
++                                          touch.y - touch.start_y) > 6 * state_.scale;
++        if (past_slop) {
+           touch.tap = false;
+         }
+         if (touch.role == Role::Pad) {
+-          pads++;
+-          /* The first live pad controls dragging, irrespective of Android's pointer indices. */
+-          if (!primary || state_.held == 0) {
+-            dx += mx;
+-            dy += my;
++          if (pads == 0) {
++            first_dx = mx;
++            first_dy = my;
+           }
+-          primary = true;
++          pads++;
++          dx += mx;
++          dy += my;
++          moved |= past_slop;
+         }
+         else if (touch.role == Role::Grip) {
+           state_.panel.left += mx;
+@@ -201,20 +285,42 @@ class Controller {
+         break;
+       }
+     }
+-    if (pads >= 2 && state_.held == 0) {
+-      for (Touch &touch : touches_) {
+-        touch.tap = false;
+-      }
++    if (moved && pending_tap_) {
++      flush_tap();
++    }
++    if (moved) {
++      chord_tap_ = false;
++    }
++    if (!pads || chord_lifted_) {
++      return;
++    }
++    const int manual = manual_buttons();
++    if (manual == 0 && pads >= 3) {
+       wheel_remainder_ += dy / pads;
+       const float step = 32 * state_.scale;
+-      /* Android finger-down motion scrolls content down: send a positive wheel notch. */
+       while (std::abs(wheel_remainder_) >= step) {
+         const int delta = wheel_remainder_ > 0 ? 1 : -1;
+         wheel(delta);
+         wheel_remainder_ -= delta * step;
+       }
++      return;
++    }
++    if (manual == 0 && pads == 2) {
++      if (!middle_gesture_ && moved) {
++        start_middle();
++      }
++      if (!middle_gesture_) {
++        return;
++      }
++      dx /= pads;
++      dy /= pads;
++    }
++    else {
++      /* Explicit held buttons use the first pad; lifting other fingers never changes its ID. */
++      dx = first_dx;
++      dy = first_dy;
+     }
+-    else if (pads > 0 && (dx != 0 || dy != 0)) {
++    if (dx != 0 || dy != 0) {
+       sync_cursor(state_.x + dx, state_.y + dy);
+       motion();
+     }
+@@ -224,26 +330,52 @@ class Controller {
+     if (!captured_) {
+       return;
+     }
++    tick(time);
+     for (Touch &touch : touches_) {
+       if (!touch.active || touch.id != id) {
+         continue;
+       }
+-      const bool click = !suppressed_ && touch.role == Role::Pad && touch.tap &&
++      const bool pad = touch.role == Role::Pad;
++      const bool click = !suppressed_ && pad && touch.tap && chord_max_ == 1 &&
+                          time - touch.time <= 300 && state_.held == 0;
+       touch.active = false;
++      if (pad && chord_max_ >= 2) {
++        middle_gesture_ = false;
++        chord_lifted_ = true; /* Do not reinterpret the remaining finger as hover or a click. */
++      }
+       sync_buttons();
+-      if (click && !state_.panel.contains(state_.x, state_.y)) {
+-        motion();
+-        emit_({Kind::ButtonDown, int(state_.x), int(state_.y), 1});
+-        emit_({Kind::ButtonUp, int(state_.x), int(state_.y), 1});
++      if (click && can_click()) {
++        if (second_tap_ && pending_tap_) {
++          pending_tap_ = second_tap_ = false;
++          click_at(4, state_.x, state_.y);
++        }
++        else {
++          pending_tap_ = true;
++          tap_deadline_ = time + 240;
++          tap_x_ = state_.x;
++          tap_y_ = state_.y;
++          tap_touch_x_ = touch.x;
++          tap_touch_y_ = touch.y;
++        }
++      }
++      else if (second_tap_) {
++        flush_tap();
++      }
++      if (pad && !suppressed_ && chord_max_ == 2 && chord_tap_ && pad_count() == 0 &&
++          time - chord_started_ < 180 && state_.held == 0 && can_click())
++      {
++        click_at(4, state_.x, state_.y); /* Two-finger taps also open the context menu. */
++        chord_tap_ = false;
+       }
+       break;
+     }
+     wheel_remainder_ = 0;
+     if (final) {
+       touches_ = {};
+-      sync_buttons(); /* Latched buttons deliberately survive lifting the last finger. */
++      middle_gesture_ = false;
++      sync_buttons(); /* Latched toolbar buttons survive lifting the last finger. */
+       captured_ = suppressed_ = false;
++      second_tap_ = false;
+     }
+   }
+ 
+@@ -263,6 +395,61 @@ class Controller {
+   int width_ = 1, height_ = 1;
+   bool captured_ = false, suppressed_ = false, positioned_ = false;
+   float wheel_remainder_ = 0;
++  bool middle_gesture_ = false, chord_tap_ = false, chord_lifted_ = false;
++  int chord_max_ = 0;
++  uint64_t chord_started_ = 0;
++  bool pending_tap_ = false, second_tap_ = false;
++  uint64_t tap_deadline_ = 0, second_deadline_ = 0;
++  float tap_x_ = 0, tap_y_ = 0, tap_touch_x_ = 0, tap_touch_y_ = 0;
++
++  int pad_count() const
++  {
++    int count = 0;
++    for (const Touch &touch : touches_) {
++      count += touch.active && touch.role == Role::Pad;
++    }
++    return count;
++  }
++  int manual_buttons() const
++  {
++    int buttons = state_.latched;
++    for (const Touch &touch : touches_) {
++      if (touch.active && touch.role == Role::Button) {
++        buttons |= touch.button;
++      }
++    }
++    return buttons;
++  }
++  bool can_click() const
++  {
++    return !state_.panel.contains(state_.x, state_.y) &&
++           !keyboard_.contains(state_.x, state_.y);
++  }
++  void click_at(int button, float x, float y)
++  {
++    emit_({Kind::Motion, int(x), int(y)});
++    emit_({Kind::ButtonDown, int(x), int(y), button});
++    emit_({Kind::ButtonUp, int(x), int(y), button});
++    if (x != state_.x || y != state_.y) {
++      motion();
++    }
++  }
++  void flush_tap()
++  {
++    const bool pending = pending_tap_;
++    pending_tap_ = second_tap_ = false;
++    if (pending) {
++      click_at(1, tap_x_, tap_y_);
++    }
++  }
++  void start_middle()
++  {
++    chord_tap_ = false;
++    if (can_click()) {
++      middle_gesture_ = true;
++      sync_buttons();
++    }
++  }
+ 
+   float panel_width() const { return std::min(float(width_), 432 * state_.scale); }
+   void layout()
+@@ -298,12 +485,7 @@ class Controller {
+   }
+   void sync_buttons()
+   {
+-    int next = state_.latched;
+-    for (const Touch &touch : touches_) {
+-      if (touch.active && touch.role == Role::Button) {
+-        next |= touch.button;
+-      }
+-    }
++    const int next = manual_buttons() | (middle_gesture_ ? 2 : 0);
+     if (next == state_.held) {
+       return;
+     }
+diff --git a/intern/ghost/intern/GHOST_SystemAndroid.cc b/intern/ghost/intern/GHOST_SystemAndroid.cc
+index c516edc9..f146a163 100644
+--- a/intern/ghost/intern/GHOST_SystemAndroid.cc
++++ b/intern/ghost/intern/GHOST_SystemAndroid.cc
+@@ -53,9 +53,17 @@ static constexpr int32_t TOUCH_LONG_PRESS_MOVE_PX = 16;
+ static constexpr float GESTURE_DECIDE_PX = 24.0f;
+ 
+ GHOST_SystemAndroid::GHOST_SystemAndroid()
+-    : virtual_mouse_([this](const ghost::virtual_mouse::Event &event) {
++    : virtual_mouse_events_([this](const ghost::virtual_mouse::Event &event) {
+         dispatchVirtualMouseEvent(event);
+       }),
++      virtual_mouse_([this](const ghost::virtual_mouse::Event &event) {
++        /* Queries see the newest position even before hover events are flushed. */
++        if (event.kind == ghost::virtual_mouse::Kind::Motion) {
++          cursor_x_ = event.x;
++          cursor_y_ = event.y;
++        }
++        virtual_mouse_events_.push(event);
++      }),
+       app_(g_android_app),
+       window_(nullptr),
+       meta_state_(0),
+@@ -120,6 +128,8 @@ bool GHOST_SystemAndroid::processEvents(bool /*waitForEvent*/)
+   /* A finger held still emits no events, so the long-press is timed here. */
+   touchLongPressCheck();
+   hoverExitCheck();
++  virtual_mouse_.tick(getMilliSeconds());
++  virtual_mouse_events_.flush();
+ 
+   /* Input arrives asynchronously via the glue calling handleInputEvent(), which
+    * queues GHOST events. Report whether any are pending so the window manager
+@@ -333,6 +343,7 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
+     if (virtual_mouse_.state().enabled || virtual_mouse_.capturing()) {
+       virtual_mouse_.set_enabled(false);
+       virtual_mouse_.cancel();
++      virtual_mouse_events_.flush();
+       pushEvent(std::make_unique<GHOST_Event>(
+           getMilliSeconds(), GHOST_kEventWindowUpdate, window_));
+     }
+@@ -376,17 +387,14 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
+           virtual_mouse_.pointer_up(AMotionEvent_getPointerId(event, index), time,
+                                      action == AMOTION_EVENT_ACTION_UP);
+         }
+-        pushEvent(std::make_unique<GHOST_Event>(time, GHOST_kEventWindowUpdate, window_));
+         return 1; /* Even Close must consume the final UP of the stream it owned. */
+       }
+       else if (action == AMOTION_EVENT_ACTION_CANCEL) {
+         virtual_mouse_.cancel();
+-        pushEvent(std::make_unique<GHOST_Event>(time, GHOST_kEventWindowUpdate, window_));
+         return 1;
+       }
+     }
+     if (virtual_mouse_.capturing()) {
+-      pushEvent(std::make_unique<GHOST_Event>(time, GHOST_kEventWindowUpdate, window_));
+       return 1;
+     }
+   }
+@@ -1062,6 +1070,7 @@ GHOST_TSuccess GHOST_SystemAndroid::setCursorPosition(int32_t x, int32_t y)
+   if (!virtual_mouse_.state().enabled) {
+     return GHOST_kFailure;
+   }
++  virtual_mouse_events_.flush();
+   virtual_mouse_.sync_cursor(x, y);
+   cursor_x_ = int32_t(virtual_mouse_.state().x);
+   cursor_y_ = int32_t(virtual_mouse_.state().y);
+@@ -1089,6 +1098,7 @@ void GHOST_SystemAndroid::setVirtualMouseEnabled(bool enabled)
+     virtual_mouse_.sync_cursor(cursor_x_, cursor_y_);
+   }
+   virtual_mouse_.set_enabled(enabled);
++  virtual_mouse_events_.flush();
+ }
+ 
+ const ghost::virtual_mouse::State &GHOST_SystemAndroid::getVirtualMouseState()
+diff --git a/intern/ghost/intern/GHOST_SystemAndroid.hh b/intern/ghost/intern/GHOST_SystemAndroid.hh
+index bbd1e9d5..35f6ddcc 100644
+--- a/intern/ghost/intern/GHOST_SystemAndroid.hh
++++ b/intern/ghost/intern/GHOST_SystemAndroid.hh
+@@ -106,6 +106,7 @@ class GHOST_SystemAndroid : public GHOST_System {
+ 
+   void updateVirtualMouseViewport();
+   void dispatchVirtualMouseEvent(const ghost::virtual_mouse::Event &event);
++  ghost::virtual_mouse::EventQueue virtual_mouse_events_;
+   ghost::virtual_mouse::Controller virtual_mouse_;
+ 
+   android_app *app_;
+diff --git a/source/blender/windowmanager/intern/wm_draw.cc b/source/blender/windowmanager/intern/wm_draw.cc
+index 82fb6307..6b68ab72 100644
+--- a/source/blender/windowmanager/intern/wm_draw.cc
++++ b/source/blender/windowmanager/intern/wm_draw.cc
+@@ -1230,6 +1230,13 @@ static void wm_draw_window_onscreen(bContext *C, wmWindow *win, int view)
+     }
+   }
+ 
++#ifdef __ANDROID__
++  /* The phone pointer is a final overlay, above menus, popups, gestures and drag previews. */
++  wmWindowViewport_ex(win, 0.0f);
++  wm_virtual_mouse_draw_cursor(win);
++  wmWindowViewport(win);
++#endif
++
+   GPU_debug_group_end();
+ }
+ 
+@@ -1545,7 +1552,8 @@ static bool wm_draw_update_test_window(Main *bmain, bContext *C, wmWindow *win)
+   ViewLayer *view_layer = WM_window_get_active_view_layer(win);
+   Depsgraph *depsgraph = BKE_scene_ensure_depsgraph(bmain, scene, view_layer);
+   bScreen *screen = WM_window_get_active_screen(win);
+-  bool do_draw = false;
++  /* Cursor/control changes only need cached regions composited, not NC_WINDOW scene redraws. */
++  bool do_draw = wm_virtual_mouse_redraw_pending(win);
+ 
+   for (ARegion &region : screen->regionbase) {
+     if (region.runtime->do_draw_paintcursor) {
+diff --git a/source/blender/windowmanager/intern/wm_virtual_mouse.cc b/source/blender/windowmanager/intern/wm_virtual_mouse.cc
+index 0e215fe1..da71951a 100644
+--- a/source/blender/windowmanager/intern/wm_virtual_mouse.cc
++++ b/source/blender/windowmanager/intern/wm_virtual_mouse.cc
+@@ -28,6 +28,7 @@ namespace blender {
+ using namespace ghost::virtual_mouse;
+ static wmWindow *mouse_window = nullptr;
+ static void *mouse_draw_handle = nullptr;
++static State mouse_drawn_state;
+ 
+ static void mouse_rect(uint pos, const Rect &rect, float height, const float color[4])
+ {
+@@ -76,7 +77,7 @@ static void mouse_draw(const wmWindow *win, void * /*customdata*/)
+   const float key_color[4] = {0.24f, 0.24f, 0.24f, 1};
+   const float active_color[4] = {0.28f, 0.46f, 0.69f, 1};
+   const float close_color[4] = {0.42f, 0.17f, 0.15f, 1};
+-  const float black[4] = {0, 0, 0, 1}, white[4] = {1, 1, 1, 1};
++  const float white[4] = {1, 1, 1, 1};
+   GPUVertFormat *format = immVertexFormat();
+   const uint pos = GPU_vertformat_attr_add(format, "pos", gpu::VertAttrType::SFLOAT_32_32);
+   GPU_blend(GPU_BLEND_ALPHA);
+@@ -117,17 +118,59 @@ static void mouse_draw(const wmWindow *win, void * /*customdata*/)
+   }
+   BLF_batch_draw_flush();
+ 
+-  /* Draw last, above the controls and keyboard. The arrow tip marks the real click position. */
+-  format = immVertexFormat();
+-  const uint arrow_pos = GPU_vertformat_attr_add(format, "pos", gpu::VertAttrType::SFLOAT_32_32);
++
++  GPU_blend(GPU_BLEND_NONE);
++}
++#endif
++
++/* Querying a small state snapshot keeps idle frames idle and cursor frames cheap. */
++bool wm_virtual_mouse_redraw_pending(wmWindow *win)
++{
++#ifdef __ANDROID__
++  if (mouse_window != win) {
++    return false;
++  }
++  State state;
++  GHOST_android_virtual_mouse_get_state(&state);
++  const State &old = mouse_drawn_state;
++  return state.enabled != old.enabled || (state.enabled &&
++      (state.x != old.x || state.y != old.y || state.scale != old.scale ||
++       state.panel.left != old.panel.left || state.panel.top != old.panel.top ||
++       state.panel.right != old.panel.right || state.panel.bottom != old.panel.bottom ||
++       state.held != old.held || state.latched != old.latched || state.hold_armed != old.hold_armed));
++#else
++  (void)win;
++  return false;
++#endif
++}
++
++/* Called by wm_draw_window_onscreen after all floating menus and other overlays. */
++void wm_virtual_mouse_draw_cursor(const wmWindow *win)
++{
++#ifdef __ANDROID__
++  if (mouse_window != win) {
++    return;
++  }
++  State state;
++  GHOST_android_virtual_mouse_get_state(&state);
++  mouse_drawn_state = state;
++  if (!state.enabled) {
++    return;
++  }
++  const float black[4] = {0, 0, 0, 1}, white[4] = {1, 1, 1, 1};
++  GPUVertFormat *format = immVertexFormat();
++  const uint pos = GPU_vertformat_attr_add(format, "pos", gpu::VertAttrType::SFLOAT_32_32);
++  GPU_blend(GPU_BLEND_ALPHA);
+   immBindBuiltinProgram(GPU_SHADER_3D_UNIFORM_COLOR);
+-  mouse_arrow(arrow_pos, state.x, win->sizey - state.y, state.scale, black);
+-  mouse_arrow(arrow_pos, state.x + 2 * state.scale, win->sizey - state.y - 4 * state.scale,
++  mouse_arrow(pos, state.x, win->sizey - state.y, state.scale, black);
++  mouse_arrow(pos, state.x + 2 * state.scale, win->sizey - state.y - 4 * state.scale,
+               state.scale * 0.70f, white);
+   immUnbindProgram();
+   GPU_blend(GPU_BLEND_NONE);
+-}
++#else
++  (void)win;
+ #endif
++}
+ 
+ void wm_virtual_mouse_window_close(wmWindow *win)
+ {
+@@ -185,7 +228,8 @@ void WM_OT_virtual_mouse_toggle(wmOperatorType *ot)
+   ot->name = "Toggle Virtual Mouse";
+   ot->idname = "WM_OT_virtual_mouse_toggle";
+   ot->description = "Swipe to move a mouse pointer; use Left, Middle or Right to click. "
+-                    "Tap Hold then a button to drag, and Release to finish. Two fingers scroll";
++                    "Single tap: left click; double tap: right click. Two fingers drag the middle button; "
++                    "three fingers scroll. Hold then a button also supports dragging";
+   ot->exec = virtual_mouse_toggle_exec;
+   ot->poll = virtual_mouse_poll;
+ }
+diff --git a/source/blender/windowmanager/wm.hh b/source/blender/windowmanager/wm.hh
+index 9a268b94..d71391aa 100644
+--- a/source/blender/windowmanager/wm.hh
++++ b/source/blender/windowmanager/wm.hh
+@@ -142,6 +142,8 @@ void wm_stereo3d_set_cancel(bContext *C, wmOperator *op);
+ void WM_OT_virtual_keyboard_toggle(wmOperatorType *ot);
+ void WM_OT_virtual_mouse_toggle(wmOperatorType *ot);
+ void wm_virtual_mouse_window_close(wmWindow *win);
++bool wm_virtual_mouse_redraw_pending(wmWindow *win);
++void wm_virtual_mouse_draw_cursor(const wmWindow *win);
+ /**
+  * Answer a GHOST pointer event that belongs to the on-screen keyboard.
+  *

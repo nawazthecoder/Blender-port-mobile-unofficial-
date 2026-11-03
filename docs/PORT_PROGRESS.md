@@ -198,3 +198,21 @@ Polyvra and Forge Mobile Studio have not been modified.
 - The development signing identity was restored successfully from the first
   revision 9 CI run. Source changes are saved on the existing PR branch.
 - Revision 9 virtual mouse phone validation remains pending.
+
+
+## Revision 10 — gesture mouse and menu visibility
+
+- User reports revision 9 works, but popup menus cover its pointer and pointer
+  movement lags while Blender remains responsive.
+- Draw the pointer after menus, gesture overlays, drag previews and other cursors.
+  Leave the toolbar at the normal overlay stage.
+- Replace per-touch full-window update notifiers with state-based compositing
+  requests. Coalesce idle/hover motions to the newest position each frame while
+  preserving held-button paths and flushing before button/wheel boundaries.
+- Add single-tap Left, double-tap Right (no preceding Left), two-finger Right tap,
+  two-finger Middle hold/drag, and three-finger vertical wheel. Existing explicit
+  click/hold/wheel controls remain available.
+- Retain application ID org.blender.androidport and development signing cache
+  so revision 10 can update the installed Blender Android revision 9.
+- Local controller/queue sanitizer tests, 16 preparation/package unit tests and
+  overlay syntax checks pass. Native build and phone validation are pending.

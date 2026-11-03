@@ -11,10 +11,11 @@ The native build now applies the repository's Android patch to the exact officia
 5.2.3 release commit. The source lock, patch and build scripts are committed here;
 the build does not rename a 5.3 alpha binary or substitute a diagnostic renderer.
 
-**Virtual mouse:** revision 9 adds a relative pointer, Left/Middle/Right buttons,
-latched dragging, and scrolling. See [controls and installation](docs/VIRTUAL_MOUSE.md).
-The new **Blender Android** app installs alongside revision 7. Device validation
-of the new mouse mode is pending.
+**Virtual mouse:** revision 10 keeps the pointer above menus, adds double-tap
+right click, two-finger middle drag and three-finger scrolling, and reduces
+pointer redraw and hover-queue overhead. See [controls and installation](docs/VIRTUAL_MOUSE.md).
+**Blender Android** revision 10 updates revision 9 and can remain alongside
+revision 7. The new behavior still needs native build and phone validation.
 
 Validated build: [revision 9 virtual mouse workflow](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41582692540).
 The full ARM64 APK is available in its `blender-5.2.3-android-full-arm64` artifact.

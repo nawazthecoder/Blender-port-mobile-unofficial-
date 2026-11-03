@@ -44,6 +44,8 @@ int main()
   {
     Fixture f;
     f.down({17, 700, 400}); f.up();
+    assert(f.count(Kind::ButtonDown) == 0);
+    f.mouse.tick(f.time + 240);
     assert(f.count(Kind::ButtonDown, 1) == 1 && f.count(Kind::ButtonUp, 1) == 1);
     assert(f.mouse.state().x == 500 && f.mouse.state().y == 300);
   }
@@ -86,8 +88,10 @@ int main()
   {
     Fixture f;
     f.down({17, 750, 350}); f.mouse.pointer_down(40, 850, 350, f.time);
-    Point points[] = {{40, 850, 390}, {17, 750, 390}};
-    f.mouse.move(points, 2);
+    f.mouse.pointer_down(99, 950, 350, f.time);
+    Point points[] = {{99, 950, 390}, {40, 850, 390}, {17, 750, 390}};
+    f.mouse.move(points, 3);
+    f.mouse.pointer_up(99, f.time + 90, false);
     f.mouse.pointer_up(40, f.time + 100, false); f.up();
     assert(f.count(Kind::Wheel) == 1 && f.events.back().delta == 1);
     assert(f.count(Kind::ButtonDown) == 0 && f.mouse.state().y == 300);
@@ -147,5 +151,119 @@ int main()
     f.tap(Hold);
     assert(f.count(Kind::ButtonUp, 1) == 1 && f.events.back().y == 399);
   }
-  std::cout << "Virtual mouse: clicks, relative motion, latch, multitouch, scrolling, keyboard, lifecycle passed\n";
+  {
+    Fixture f;
+    f.down({17, 750, 350}); f.up();
+    f.mouse.tick(1339); assert(f.count(Kind::ButtonDown) == 0);
+    f.mouse.tick(1340); assert(f.count(Kind::ButtonDown, 1) == 1);
+    f.mouse.tick(2000); assert(f.count(Kind::ButtonDown) == 1);
+  }
+  {
+    Fixture f;
+    f.down({17, 750, 350}); f.up();
+    f.down({17, 750, 350}); f.up();
+    f.mouse.tick(3000);
+    assert(f.count(Kind::ButtonDown, 1) == 0 && f.count(Kind::ButtonDown, 4) == 1);
+    assert(f.count(Kind::ButtonUp, 4) == 1);
+  }
+  {
+    Fixture f;
+    f.down({17, 750, 350}); f.up();
+    f.down({17, 900, 350}); f.up();
+    f.mouse.tick(3000);
+    assert(f.count(Kind::ButtonDown, 1) == 2 && f.count(Kind::ButtonDown, 4) == 0);
+  }
+  {
+    Fixture f;
+    f.down({17, 750, 350}); f.up();
+    f.down({17, 750, 350});
+    Point p{17, 810, 350}; f.mouse.move(&p, 1); f.up(); f.mouse.tick(3000);
+    assert(f.count(Kind::ButtonDown, 1) == 1 && f.count(Kind::ButtonDown, 4) == 0);
+    for (const Event &e : f.events) {
+      if (e.kind == Kind::ButtonDown) { assert(e.x == 500 && e.y == 300); }
+    }
+    assert(f.mouse.state().x == 560); /* Movement has no double-tap delay or interpolation tail. */
+  }
+  {
+    Fixture f;
+    f.down({17, 750, 350}); f.mouse.pointer_down(40, 850, 350, 1010);
+    f.mouse.pointer_up(40, 1100, false); f.mouse.pointer_up(17, 1110, true);
+    f.mouse.tick(3000);
+    assert(f.count(Kind::ButtonDown, 4) == 1 && f.count(Kind::ButtonDown, 1) == 0);
+  }
+  {
+    Fixture f;
+    f.down({17, 750, 350}); f.mouse.pointer_down(40, 850, 350, 1010);
+    f.mouse.tick(1189); assert(f.mouse.state().held == 0);
+    f.mouse.tick(1190); assert(f.mouse.state().held == 2);
+    f.mouse.pointer_up(40, 1200, false);
+    assert(f.mouse.state().held == 0 && f.count(Kind::ButtonUp, 2) == 1);
+    Point p{17, 850, 450}; f.mouse.move(&p, 1);
+    f.mouse.pointer_up(17, 1210, true); f.mouse.tick(3000);
+    assert(f.mouse.state().x == 500 && f.mouse.state().y == 300);
+    assert(f.count(Kind::ButtonDown) == 1);
+  }
+  {
+    Fixture f;
+    f.down({17, 750, 350}); f.mouse.pointer_down(40, 850, 350, 1010);
+    Point points[] = {{40, 890, 370}, {17, 790, 370}};
+    f.mouse.move(points, 2);
+    assert(f.mouse.state().held == 2 && f.mouse.state().x == 540 && f.mouse.state().y == 320);
+    assert(f.count(Kind::Wheel) == 0);
+    f.mouse.pointer_down(99, 950, 370, 1100);
+    assert(f.mouse.state().held == 0 && f.count(Kind::ButtonUp, 2) == 1);
+    Point scroll[] = {{99, 950, 434}, {40, 890, 434}, {17, 790, 434}};
+    f.mouse.move(scroll, 3);
+    assert(f.count(Kind::Wheel) == 2 && f.mouse.state().y == 320);
+    f.mouse.pointer_up(99, 1120, false);
+    scroll[1].y += 100; scroll[2].y += 100; f.mouse.move(scroll + 1, 2);
+    assert(f.count(Kind::Wheel) == 2 && f.count(Kind::ButtonDown) == 1);
+    f.mouse.pointer_up(40, 1140, false); f.mouse.pointer_up(17, 1150, true);
+  }
+  {
+    Fixture f;
+    f.down({17, 750, 350}); f.up(); f.mouse.cancel(); f.mouse.tick(3000);
+    assert(f.count(Kind::ButtonDown) == 0);
+    f.down({17, 750, 350}); f.mouse.pointer_down(40, 850, 350, f.time);
+    f.mouse.tick(f.time + 180); assert(f.mouse.state().held == 2);
+    f.mouse.cancel(true);
+    assert(f.mouse.state().held == 0 && f.count(Kind::ButtonUp, 2) == 1);
+    f.mouse.pointer_up(17, f.time + 300, true); f.mouse.tick(4000);
+    assert(f.count(Kind::ButtonDown, 1) == 0 && f.count(Kind::ButtonDown, 4) == 0);
+  }
+  {
+    std::vector<Event> events;
+    EventQueue queue([&](const Event &event) { events.push_back(event); });
+    for (int i = 0; i < 10000; i++) { queue.push({Kind::Motion, i, i}); }
+    assert(events.empty());
+    queue.flush();
+    assert(events.size() == 1 && events[0].x == 9999);
+    queue.push({Kind::Motion, 10, 20});
+    queue.push({Kind::ButtonDown, 10, 20, 1});
+    assert(events.size() == 3 && events[1].kind == Kind::Motion &&
+           events[2].kind == Kind::ButtonDown && events[1].x == 10);
+    for (int i = 0; i < 20; i++) { queue.push({Kind::Motion, 20 + i, 20}); }
+    assert(events.size() == 23); /* Held-button painting/dragging samples are never coalesced. */
+    queue.push({Kind::ButtonUp, 39, 20, 1});
+    queue.push({Kind::Motion, 50, 60});
+    queue.push({Kind::Wheel, 50, 60, 0, -1});
+    assert(events.size() == 26 && events[24].kind == Kind::Motion &&
+           events[25].kind == Kind::Wheel && events[24].x == 50);
+    queue.flush(); assert(events.size() == 26);
+  }
+  {
+    Fixture f;
+    f.down({17, 700, 350});
+    f.mouse.pointer_down(41, 800, 350, 1010);
+    f.mouse.pointer_down(93, 900, 350, 1020);
+    Point down[] = {{93, 900, 390}, {17, 700, 390}, {41, 800, 390}};
+    f.mouse.move(down, 3);
+    assert(f.count(Kind::Wheel) == 1 && f.events.back().delta == 1);
+    for (Point &p : down) { p.y -= 80; }
+    f.mouse.move(down, 3);
+    assert(f.count(Kind::Wheel) == 3 && f.events.back().delta == -1);
+    assert(f.count(Kind::ButtonDown) == 0 && f.mouse.state().y == 300);
+  }
+  std::cout << "Virtual mouse: gesture clicks, middle drag, three-finger wheel, lifecycle, "
+               "keyboard and bounded hover queue passed\n";
 }

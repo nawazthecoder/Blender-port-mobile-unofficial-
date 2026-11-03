@@ -135,7 +135,7 @@ jobs:
           from pathlib import Path
           identity = Path('artifacts/apk-identity.txt').read_text()
           assert "package: name='org.blender.androidport'" in identity, identity[:500]
-          assert "versionCode='5020309'" in identity, identity[:500]
+          assert "versionCode='5020310'" in identity, identity[:500]
           assert "application-label:'Blender Android'" in identity, identity[:500]
           PYCODE
           "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --print-certs artifacts/blender-5.2.3-android-full.apk > artifacts/signing-certificate.txt
