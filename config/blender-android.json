@@ -48,7 +48,7 @@
     },
     {
       "path": "patches/0009-android-virtual-mouse.patch",
-      "sha256": "852b8a88b18ba9d1bbdf6e7c87c4d5fea3993470242403459095da36707b4ada"
+      "sha256": "d803b641ff34671b4ca7519ec3b1119c78c2f749f791a42b2c905a6f1d4855ac"
     }
   ]
 }

@@ -531,7 +531,7 @@ index 00000000..d3666979
 +void GHOST_android_virtual_mouse_set_keyboard_rect(ghost::virtual_mouse::Rect rect);
 +#endif
 diff --git a/intern/ghost/intern/GHOST_SystemAndroid.cc b/intern/ghost/intern/GHOST_SystemAndroid.cc
-index 51c99287..397db6b2 100644
+index 51c99287..c516edc9 100644
 --- a/intern/ghost/intern/GHOST_SystemAndroid.cc
 +++ b/intern/ghost/intern/GHOST_SystemAndroid.cc
 @@ -53,7 +53,10 @@ static constexpr int32_t TOUCH_LONG_PRESS_MOVE_PX = 16;
@@ -662,7 +662,7 @@ index 51c99287..397db6b2 100644
    return GHOST_kSuccess;
  }
  
-@@ -973,10 +1057,99 @@ GHOST_TSuccess GHOST_SystemAndroid::getCursorPosition(int32_t &x, int32_t &y) co
+@@ -973,10 +1057,101 @@ GHOST_TSuccess GHOST_SystemAndroid::getCursorPosition(int32_t &x, int32_t &y) co
    return GHOST_kSuccess;
  }
  
@@ -703,8 +703,10 @@ index 51c99287..397db6b2 100644
 +  virtual_mouse_.set_enabled(enabled);
 +}
 +
-+const ghost::virtual_mouse::State &GHOST_SystemAndroid::getVirtualMouseState() const
++const ghost::virtual_mouse::State &GHOST_SystemAndroid::getVirtualMouseState()
 +{
++  /* Drawing can be the first activity after rotation, before another touch arrives. */
++  updateVirtualMouseViewport();
 +  return virtual_mouse_.state();
 +}
 +
@@ -766,7 +768,7 @@ index 51c99287..397db6b2 100644
  
  uint16_t GHOST_SystemAndroid::getDPIHint()
 diff --git a/intern/ghost/intern/GHOST_SystemAndroid.hh b/intern/ghost/intern/GHOST_SystemAndroid.hh
-index a057c6b6..5b89d6b2 100644
+index a057c6b6..bbd1e9d5 100644
 --- a/intern/ghost/intern/GHOST_SystemAndroid.hh
 +++ b/intern/ghost/intern/GHOST_SystemAndroid.hh
 @@ -9,6 +9,7 @@
@@ -782,7 +784,7 @@ index a057c6b6..5b89d6b2 100644
    uint16_t getDPIHint();
  
 +  void setVirtualMouseEnabled(bool enabled);
-+  const ghost::virtual_mouse::State &getVirtualMouseState() const;
++  const ghost::virtual_mouse::State &getVirtualMouseState();
 +  void setVirtualMouseKeyboardRect(ghost::virtual_mouse::Rect rect);
 +
 +
