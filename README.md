@@ -16,7 +16,7 @@ latched dragging, and scrolling. See [controls and installation](docs/VIRTUAL_MO
 The new **Blender Android** app installs alongside revision 7. Device validation
 of the new mouse mode is pending.
 
-Validated build: [revision 7 workflow](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41408648885).
+Validated build: [revision 9 virtual mouse workflow](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41582692540).
 The full ARM64 APK is available in its `blender-5.2.3-android-full-arm64` artifact.
 
 ## Build the full editor

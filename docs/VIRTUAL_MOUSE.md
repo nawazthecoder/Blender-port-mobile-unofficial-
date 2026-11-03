@@ -37,8 +37,9 @@ The real controller is exercised by `tests/android_virtual_mouse_smoke.py` with
 AddressSanitizer and UndefinedBehaviorSanitizer. Tests cover click coordinates,
 relative motion, latched left/middle/right drags, reordered touch IDs, two-finger
 scrolling, keyboard exclusion, moving the strip, and releasing interrupted input.
-Full native compilation, APK identity, signatures, ELF dependency closure and
-runtime payload checks run in GitHub Actions. Phone validation of this new mode
+Full native compilation, APK identity, v3 signatures, ELF dependency closure and
+runtime payload checks passed in [workflow 41582692540](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41582692540).
+Phone validation of this new mode
 remains pending; revision 7 startup was confirmed separately by the user.
 
 The CI development signing key is cached under `android-port-development-signing-v1`

@@ -16,7 +16,7 @@
   "android_min_api": 31,
   "configuration": "full",
   "port_revision": 9,
-  "status": "revision9-virtual-mouse-native-build-pending",
+  "status": "revision9-native-build-validated-virtual-mouse-device-testing-pending",
   "additional_patches": [
     {
       "path": "patches/0002-stable-build-fixes.patch",

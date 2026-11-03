@@ -153,7 +153,7 @@ Run: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/ru
   requirements are unchanged. The Android popup reports the active backend.
 - A local C++ check reproduced the old preference choice and validated the new
   Android selection, explicit overrides, and unchanged desktop preference logic.
-  Native compilation/package checks for revision 8 remain pending.
+  Native compilation/package checks for revision 8 passed in workflow 41431024412.
 - The texture-paint warning matches the stock missing-image/linked-data check;
   no evidence yet establishes a texture-paint renderer defect. Instructions are
   in `docs/ANDROID_TROUBLESHOOTING.md`.
@@ -166,8 +166,8 @@ Run: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/ru
    `scripts/prepare_stable_android.py`. Apply all listed patches in order.
 4. Fix actual compiler/linker/package failures, preserve each source change as a
    new patch, update its checksum and commit it to the same PR branch.
-5. Keep the PR draft until compilation/package validation succeeds. Record device
-   testing separately; no real-device startup or render has been validated yet.
+5. Keep the PR draft pending broader device checks. The user confirmed revision 7
+   startup; record later device feature checks separately from build/package checks.
 
 Main was not updated: automatic review rejected the direct main push. The branch
 and PR safely preserve the implementation without changing the default branch.
@@ -185,4 +185,16 @@ Polyvra and Forge Mobile Studio have not been modified.
   install alongside the user's working revision 7. The old ephemeral signing key
   is unavailable; the new CI development identity is cached for future updates.
 - Added sanitizer-backed tests against the actual portable input controller.
-  Full native build/package and device checks remain pending for revision 9.
+  All 16 preparation/package unit tests and sanitizer-backed input tests pass.
+- Full native build, runtime payload checks, ELF dependency closure, APK identity
+  and v3 signature validation passed for implementation
+  `046d5dd630471df8fe32b819e27017d9bb0227d4` in
+  [workflow 41582692540](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41582692540).
+  The workflow checks out PR merge `de5244332aabb70f3441a884597f572c7c59c1db`,
+  whose parents include that implementation commit.
+- Final APK: 283,076,223 bytes, 149 native libraries, versionCode 5020309.
+  SHA256: `f87bd3e1d2e2e46a2da6ea56e5fff0d5ed20856e75d41b0d1646fe9b471ca2fe`.
+  Artifact ID 13207590715 expires 2026-11-17.
+- The development signing identity was restored successfully from the first
+  revision 9 CI run. Source changes are saved on the existing PR branch.
+- Revision 9 virtual mouse phone validation remains pending.
