@@ -66,6 +66,8 @@ jobs:
           df -h .
       - name: Check native add-on dependency collection
         run: python3 user-repo/tests/native_library_collection_smoke.py blender-source
+      - name: Check virtual mouse touch sequences
+        run: python3 user-repo/tests/android_virtual_mouse_smoke.py blender-source
       - uses: android-actions/setup-android@v4
         with:
           packages: ''
@@ -102,6 +104,13 @@ jobs:
           tar -xzf /tmp/vulkan-headers.tar.gz -C /tmp/vulkan-headers
           cp -R /tmp/vulkan-headers/Vulkan-Headers-1.4.341/include \
             blender_build_android/lib/vulkan_headers/include
+      # Public development signing identity, retained for installable future updates.
+      - name: Restore Android port development signing key
+        id: signing-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: blender_build_android/android-debug.keystore
+          key: android-port-development-signing-v1
       - name: Compile full Blender and package Android APK
         id: compile
         working-directory: blender-source
@@ -121,6 +130,16 @@ jobs:
             --readelf "$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
             --report artifacts/package-audit.json
           "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose artifacts/blender-5.2.3-android-full.apk
+          "$ANDROID_HOME/build-tools/35.0.1/aapt2" dump badging artifacts/blender-5.2.3-android-full.apk > artifacts/apk-identity.txt
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          identity = Path('artifacts/apk-identity.txt').read_text()
+          assert "package: name='org.blender.androidport'" in identity, identity[:500]
+          assert "versionCode='5020309'" in identity, identity[:500]
+          assert "application-label:'Blender Android'" in identity, identity[:500]
+          PYCODE
+          "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --print-certs artifacts/blender-5.2.3-android-full.apk > artifacts/signing-certificate.txt
+          cp user-repo/docs/VIRTUAL_MOUSE.md artifacts/
           cp user-repo/config/blender-android.json artifacts/source-lock.json
           git -C user-repo rev-parse HEAD > artifacts/port-repository-commit.txt
           cp user-repo/docs/NATIVE_BLENDER_ANDROID.md artifacts/SOURCE-AND-STATUS.md
@@ -128,6 +147,12 @@ jobs:
           cp -R blender-source/release/license artifacts/licenses
           (cd artifacts && sha256sum blender-5.2.3-android-full.apk > SHA256SUMS)
           git -C blender-source diff --cached --binary > artifacts/corresponding-source.patch
+      - name: Save development signing identity after package validation
+        if: success() && steps.signing-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: blender_build_android/android-debug.keystore
+          key: android-port-development-signing-v1
       - name: Save pinned library payloads after successful dependency verification
         if: always() && steps.dependencies.outcome == 'success' && steps.deps-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4

@@ -15,8 +15,8 @@
   "vulkan_headers_version": "1.4.341",
   "android_min_api": 31,
   "configuration": "full",
-  "port_revision": 8,
-  "status": "revision7-device-startup-confirmed-graphics-preference-fix-pending",
+  "port_revision": 9,
+  "status": "revision9-virtual-mouse-native-build-pending",
   "additional_patches": [
     {
       "path": "patches/0002-stable-build-fixes.patch",
@@ -45,6 +45,10 @@
     {
       "path": "patches/0008-android-graphics-preferences.patch",
       "sha256": "6c5688a1b1b378741c86e40370b2ba546ab59fdb8e8d2a67522d4db58a723321"
+    },
+    {
+      "path": "patches/0009-android-virtual-mouse.patch",
+      "sha256": "1cb68c77f0cb83f91b7861da306635512bc11372d01681fca9b3dfa83ef41619"
     }
   ]
 }

@@ -172,3 +172,17 @@ Run: https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/ru
 Main was not updated: automatic review rejected the direct main push. The branch
 and PR safely preserve the implementation without changing the default branch.
 Polyvra and Forge Mobile Studio have not been modified.
+
+
+## Revision 9 — Android virtual mouse
+
+- Added a native relative pointer mode with real left/middle/right GHOST events,
+  held-button dragging, two-finger and button scrolling, a movable control strip,
+  keyboard exclusion, and lifecycle release handling.
+- Added a status-bar MOUSE toggle and searchable Toggle Virtual Mouse operator.
+- Revision 8 compiled and passed package checks in workflow run 41431024412.
+- Revision 9 uses org.blender.androidport and launcher label Blender Android to
+  install alongside the user's working revision 7. The old ephemeral signing key
+  is unavailable; the new CI development identity is cached for future updates.
+- Added sanitizer-backed tests against the actual portable input controller.
+  Full native build/package and device checks remain pending for revision 9.
