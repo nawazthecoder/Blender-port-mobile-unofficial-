@@ -264,6 +264,21 @@ int main()
     assert(f.count(Kind::Wheel) == 3 && f.events.back().delta == -1);
     assert(f.count(Kind::ButtonDown) == 0 && f.mouse.state().y == 300);
   }
+  {
+    Fixture f;
+    f.down({17, 700, 350}); f.mouse.pointer_down(41, 800, 350, 1010);
+    Point pads[] = {{17, 740, 350}, {41, 840, 350}};
+    f.mouse.move(pads, 2); assert(f.mouse.state().held == 2);
+    Point button = f.control(Left, 99);
+    f.mouse.pointer_down(button.id, button.x, button.y, 1100);
+    assert(f.mouse.state().held == 1 && f.count(Kind::ButtonUp, 2) == 1);
+    assert(f.events.back().kind == Kind::ButtonDown && f.events.back().button == 1);
+    f.mouse.pointer_up(41, 1120, false);
+    pads[0].x += 30; f.mouse.move(pads, 1);
+    assert(f.mouse.state().held == 1 && f.mouse.state().x == 570);
+    f.mouse.pointer_up(99, 1140, false); f.mouse.pointer_up(17, 1150, true);
+    assert(f.mouse.state().held == 0 && f.count(Kind::ButtonUp, 1) == 1);
+  }
   std::cout << "Virtual mouse: gesture clicks, middle drag, three-finger wheel, lifecycle, "
                "keyboard and bounded hover queue passed\n";
 }

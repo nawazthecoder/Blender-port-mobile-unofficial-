@@ -27,7 +27,7 @@ index bc5a6e2c..10703e0d 100755
  echo "[apk] assembling"
  cp "$STAGE/base.apk" "$OUT"
 diff --git a/intern/ghost/GHOST_AndroidVirtualMouse.hh b/intern/ghost/GHOST_AndroidVirtualMouse.hh
-index d3666979..93bf68f6 100644
+index d3666979..ad767089 100644
 --- a/intern/ghost/GHOST_AndroidVirtualMouse.hh
 +++ b/intern/ghost/GHOST_AndroidVirtualMouse.hh
 @@ -44,6 +44,42 @@ struct State {
@@ -209,10 +209,10 @@ index d3666979..93bf68f6 100644
 +    if (moved) {
 +      chord_tap_ = false;
 +    }
-+    if (!pads || chord_lifted_) {
++    const int manual = manual_buttons();
++    if (!pads || (chord_lifted_ && manual == 0)) {
 +      return;
 +    }
-+    const int manual = manual_buttons();
 +    if (manual == 0 && pads >= 3) {
        wheel_remainder_ += dy / pads;
        const float step = 32 * state_.scale;
@@ -379,6 +379,16 @@ index d3666979..93bf68f6 100644
      if (next == state_.held) {
        return;
      }
+@@ -348,6 +530,9 @@ class Controller {
+         slot->role = Role::Grip;
+       }
+       else if (i >= Left && i <= Right && !state_.panel.contains(state_.x, state_.y)) {
++        /* An explicit button takes over from the automatic two-finger orbit. */
++        middle_gesture_ = false;
++        chord_tap_ = false;
+         const int button = 1 << (i - Left);
+         if (state_.latched & button) {
+           state_.latched &= ~button;
 diff --git a/intern/ghost/intern/GHOST_SystemAndroid.cc b/intern/ghost/intern/GHOST_SystemAndroid.cc
 index c516edc9..f146a163 100644
 --- a/intern/ghost/intern/GHOST_SystemAndroid.cc
