@@ -117,6 +117,8 @@ int main()
     Rect keyboard{0, 0, 1000, 400};
     f.mouse.set_keyboard_rect(keyboard);
     assert(!f.mouse.state().panel.intersects(keyboard));
+    assert(!keyboard.contains(f.mouse.state().x, f.mouse.state().y));
+    f.events.clear();
     assert(!f.mouse.begin(17, 200, 300, f.time));
     assert(!f.mouse.capturing() && f.events.empty());
     assert(f.mouse.begin(17, 900, 550, f.time)); f.up();
@@ -134,6 +136,16 @@ int main()
     Point p{17, 900, 500}; f.mouse.move(&p, 1); f.up();
     assert(f.events.empty()); /* Focus/surface loss discards the remainder without click-through. */
     f.mouse.sync_cursor(9999, -200); assert(f.mouse.state().x == 999 && f.mouse.state().y == 0);
+  }
+  {
+    Fixture f;
+    f.mouse.set_keyboard_rect({0, 400, 1000, 600});
+    f.tap(Hold); f.tap(Left);
+    f.down({17, 800, 300});
+    Point p{17, 800, 500}; f.mouse.move(&p, 1); f.up();
+    assert(f.mouse.state().y == 399 && f.mouse.state().held == 1);
+    f.tap(Hold);
+    assert(f.count(Kind::ButtonUp, 1) == 1 && f.events.back().y == 399);
   }
   std::cout << "Virtual mouse: clicks, relative motion, latch, multitouch, scrolling, keyboard, lifecycle passed\n";
 }

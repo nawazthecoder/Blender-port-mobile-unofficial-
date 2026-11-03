@@ -21,7 +21,9 @@ hidden, use operator search (F3) and choose **Toggle Virtual Mouse**.
   or zoom at the pointer. The existing touch orbit/pinch gestures are replaced
   while mouse mode is active.
 - Drag **Move** to reposition the control strip. The strip avoids the open
-  virtual keyboard, whose keys still respond to direct touches.
+  virtual keyboard, whose keys still respond to direct touches. While the keyboard
+  is open, the pointer stays in the visible editor area so drag releases cannot
+  be swallowed by a key.
 - Tap **Close** or **MOUSE** to return to direct touch. A physical mouse or stylus
   switches off virtual mouse mode automatically and keeps its existing input behavior.
 

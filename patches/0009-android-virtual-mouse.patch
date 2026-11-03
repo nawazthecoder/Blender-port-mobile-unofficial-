@@ -133,10 +133,10 @@ index 5aa48d76..b973b7f2 100755
  echo "=== deployed ($CONFIG) ==="
 diff --git a/intern/ghost/GHOST_AndroidVirtualMouse.hh b/intern/ghost/GHOST_AndroidVirtualMouse.hh
 new file mode 100644
-index 00000000..170c1bf4
+index 00000000..d3666979
 --- /dev/null
 +++ b/intern/ghost/GHOST_AndroidVirtualMouse.hh
-@@ -0,0 +1,364 @@
+@@ -0,0 +1,393 @@
 +/* SPDX-FileCopyrightText: 2026 Blender Authors
 + * SPDX-License-Identifier: GPL-2.0-or-later */
 +#pragma once
@@ -215,11 +215,39 @@ index 00000000..170c1bf4
 +  {
 +    keyboard_ = rect;
 +    layout();
++    const float old_x = state_.x, old_y = state_.y;
++    sync_cursor(state_.x, state_.y);
++    if (state_.enabled && (old_x != state_.x || old_y != state_.y)) {
++      motion();
++    }
 +  }
 +  void sync_cursor(float x, float y)
 +  {
 +    state_.x = std::clamp(x, 0.0f, float(width_ - 1));
 +    state_.y = std::clamp(y, 0.0f, float(height_ - 1));
++    if (state_.enabled && keyboard_.contains(state_.x, state_.y)) {
++      /* Keyboard keys use direct touch. Never let its event filter swallow the release of a
++       * mouse drag that began in an editor. Snap to the closest visible edge of the keyboard. */
++      float distance = float(width_ + height_);
++      float target_x = state_.x, target_y = state_.y;
++      const auto candidate = [&](float px, float py) {
++        if (px < 0 || py < 0 || px >= width_ || py >= height_ || keyboard_.contains(px, py)) {
++          return;
++        }
++        const float d = std::hypot(px - state_.x, py - state_.y);
++        if (d < distance) {
++          distance = d;
++          target_x = px;
++          target_y = py;
++        }
++      };
++      candidate(keyboard_.left - 1, state_.y);
++      candidate(keyboard_.right, state_.y);
++      candidate(state_.x, keyboard_.top - 1);
++      candidate(state_.x, keyboard_.bottom);
++      state_.x = target_x;
++      state_.y = target_y;
++    }
 +  }
 +  void set_enabled(bool enabled)
 +  {
@@ -229,6 +257,7 @@ index 00000000..170c1bf4
 +    cancel(true);
 +    state_.enabled = enabled;
 +    if (enabled) {
++      sync_cursor(state_.x, state_.y);
 +      motion();
 +    }
 +  }
@@ -502,7 +531,7 @@ index 00000000..170c1bf4
 +void GHOST_android_virtual_mouse_set_keyboard_rect(ghost::virtual_mouse::Rect rect);
 +#endif
 diff --git a/intern/ghost/intern/GHOST_SystemAndroid.cc b/intern/ghost/intern/GHOST_SystemAndroid.cc
-index 51c99287..58fda1ba 100644
+index 51c99287..397db6b2 100644
 --- a/intern/ghost/intern/GHOST_SystemAndroid.cc
 +++ b/intern/ghost/intern/GHOST_SystemAndroid.cc
 @@ -53,7 +53,10 @@ static constexpr int32_t TOUCH_LONG_PRESS_MOVE_PX = 16;
@@ -615,7 +644,25 @@ index 51c99287..58fda1ba 100644
    /* A physical/Bluetooth mouse must not go through the delayed finger-touch path: Blender relies
     * on the middle button for viewport orbit and on the right button for context menus. */
    if (tool_type == AMOTION_EVENT_TOOL_TYPE_MOUSE) {
-@@ -973,10 +1046,99 @@ GHOST_TSuccess GHOST_SystemAndroid::getCursorPosition(int32_t &x, int32_t &y) co
+@@ -864,6 +937,17 @@ GHOST_TSuccess GHOST_SystemAndroid::getModifierKeys(GHOST_ModifierKeys &keys) co
+ GHOST_TSuccess GHOST_SystemAndroid::getButtons(GHOST_Buttons &buttons) const
+ {
+   buttons = buttons_;
++  /* Direct touches on the keyboard may temporarily use Left without owning the virtual drag. */
++  const int held = virtual_mouse_.state().held;
++  if (held & 1) {
++    buttons.set(GHOST_kButtonMaskLeft, true);
++  }
++  if (held & 2) {
++    buttons.set(GHOST_kButtonMaskMiddle, true);
++  }
++  if (held & 4) {
++    buttons.set(GHOST_kButtonMaskRight, true);
++  }
+   return GHOST_kSuccess;
+ }
+ 
+@@ -973,10 +1057,99 @@ GHOST_TSuccess GHOST_SystemAndroid::getCursorPosition(int32_t &x, int32_t &y) co
    return GHOST_kSuccess;
  }
  
@@ -632,9 +679,7 @@ index 51c99287..58fda1ba 100644
 +}
 +
 +void GHOST_SystemAndroid::updateVirtualMouseViewport()
- {
--  /* Touch input has no warpable cursor. */
--  return GHOST_kFailure;
++{
 +  if (window_) {
 +    GHOST_Rect bounds;
 +    window_->getClientBounds(bounds);
@@ -644,7 +689,9 @@ index 51c99287..58fda1ba 100644
 +}
 +
 +void GHOST_SystemAndroid::setVirtualMouseEnabled(bool enabled)
-+{
+ {
+-  /* Touch input has no warpable cursor. */
+-  return GHOST_kFailure;
 +  updateVirtualMouseViewport();
 +  if (enabled && !virtual_mouse_.state().enabled) {
 +    touchCancelPending();
