@@ -69,7 +69,10 @@ button/wheel events, and preserved held-button movement samples.
 Revision 9 passed native compilation, package identity, dependency/payload audits
 and v3 signature checks in [workflow 41582692540](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41582692540).
 The user reports using it on their phone and identified menu occlusion and pointer
-lag. Revision 10's native build and phone verification are pending.
+lag. Revision 10 passed full native build, package identity, runtime/ELF/dependency
+audits and v3 signature validation in [workflow 41589347500](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41589347500).
+Its signing certificate matches revision 9, allowing an update over that app.
+Phone verification of revision 10 and measured latency remain pending.
 
 The CI development key is cached under `android-port-development-signing-v1`;
 future update compatibility depends on retaining this key. The Java activity's

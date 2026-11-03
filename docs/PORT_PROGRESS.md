@@ -215,4 +215,17 @@ Polyvra and Forge Mobile Studio have not been modified.
 - Retain application ID org.blender.androidport and development signing cache
   so revision 10 can update the installed Blender Android revision 9.
 - Local controller/queue sanitizer tests, 16 preparation/package unit tests and
-  overlay syntax checks pass. Native build and phone validation are pending.
+  overlay syntax checks pass. Full native compilation, runtime/ELF dependency
+  audits, APK identity and v3 signing passed in
+  [workflow 41589347500](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41589347500).
+- Validated implementation: `fda2b8a4206a23fe855afedcd6aaeaede649c696`.
+  Artifact provenance records merge `e46f748c62e1910d7a66b38bd2c8bb0a145fad75`,
+  whose parents include that source commit.
+- APK: 283,076,223 bytes; 149 native libraries; versionCode 5020310.
+  SHA256: `3d53cbfcaf73b08fd7b3f28aee4498f9f0b8b0c347a23c7c41df66d53d805554`.
+  Artifact 13209154437 expires 2026-11-17.
+- Revision 10 and revision 9 signing certificate SHA256 match:
+  `45971c45d2531454994f4382a402bdb3a491159cbee356a8a0effd831c76ab3e`.
+  The download was checked against the CI ZIP/APK digests and saved.
+- Gesture behavior, menu visibility and latency on the phone still need device
+  testing; no measured FPS or end-to-end latency is claimed.

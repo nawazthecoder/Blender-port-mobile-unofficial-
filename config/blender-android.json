@@ -16,7 +16,7 @@
   "android_min_api": 31,
   "configuration": "full",
   "port_revision": 10,
-  "status": "revision10-mouse-gestures-and-latency-native-build-pending",
+  "status": "revision10-native-build-validated-gesture-device-checks-pending",
   "additional_patches": [
     {
       "path": "patches/0002-stable-build-fixes.patch",

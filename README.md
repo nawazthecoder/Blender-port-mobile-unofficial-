@@ -15,9 +15,10 @@ the build does not rename a 5.3 alpha binary or substitute a diagnostic renderer
 right click, two-finger middle drag and three-finger scrolling, and reduces
 pointer redraw and hover-queue overhead. See [controls and installation](docs/VIRTUAL_MOUSE.md).
 **Blender Android** revision 10 updates revision 9 and can remain alongside
-revision 7. The new behavior still needs native build and phone validation.
+revision 7. Native build and package checks pass; the new behavior and latency still need
+phone validation.
 
-Validated build: [revision 9 virtual mouse workflow](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41582692540).
+Validated build: [revision 10 gesture mouse workflow](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41589347500).
 The full ARM64 APK is available in its `blender-5.2.3-android-full-arm64` artifact.
 
 ## Build the full editor
