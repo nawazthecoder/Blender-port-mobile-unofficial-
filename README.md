@@ -18,13 +18,13 @@ pointer redraw and hover-queue overhead. See [controls and installation](docs/VI
 revision 7. Native build and package checks pass; the new behavior and latency still need
 phone validation.
 
-Validated build: [revision 10 gesture mouse workflow](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41589347500).
+Validated build: [revision 11 graphics stability workflow](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/42001650804).
 The full ARM64 APK is available in its `blender-5.2.3-android-full-arm64` artifact.
 
 **Graphics stability:** revision 11 fixes image subresource synchronization and
 invalid frame acquisition, and adds Android idle/background scheduling improvements.
 See [graphics changes and validation](docs/GRAPHICS_STABILITY.md). Native build and
-phone validation for revision 11 are pending.
+package checks pass for revision 11; phone validation remains pending.
 
 ## Build the full editor
 

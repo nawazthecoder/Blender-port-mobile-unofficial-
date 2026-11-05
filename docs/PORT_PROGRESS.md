@@ -253,3 +253,16 @@ Polyvra and Forge Mobile Studio have not been modified.
   returning HTTP 504. The download path now retries into a temporary file, validates
   the archive before extracting, and caches pinned OIDN/ISPC build progress. An
   install-complete marker prevents partial denoiser installs from being reused.
+
+- Successful revision 11 implementation: `695724c0c7f99abb4bd622937a286e7e75876db7`.
+  [Workflow 42001650804](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/42001650804)
+  passed full native compile/link, regression fixtures, runtime/ELF dependency
+  audits, package identity, v3 signing and matching-update-certificate checks.
+  The artifact records merge `d8ddbf3655dcfba64997bc2fd55312a3a3df77bd`, whose
+  parents include the implementation commit. OIDN/ISPC cache progress was saved.
+- APK: 283,076,223 bytes; 149 native libraries; versionCode 5020311.
+  SHA256: `a27498aa3cb1b9e2f6b6096a9632058ef4b6da77d7428a192d451bf49e74839c`.
+  Artifact 13403890275 expires 2026-11-19. Download checked against CI ZIP/APK
+  hashes and saved. Signing fingerprint matches revisions 9/10.
+- Exact phone glitch cause, visual behavior and performance/power measurements
+  remain unverified. A recording and triggering action are useful if it persists.

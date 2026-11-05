@@ -16,7 +16,7 @@
   "android_min_api": 31,
   "configuration": "full",
   "port_revision": 11,
-  "status": "revision11-graphics-stability-native-build-pending",
+  "status": "revision11-native-build-validated-graphics-device-checks-pending",
   "additional_patches": [
     {
       "path": "patches/0002-stable-build-fixes.patch",

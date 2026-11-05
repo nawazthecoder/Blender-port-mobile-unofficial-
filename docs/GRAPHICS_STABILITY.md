@@ -22,7 +22,7 @@ phone incident has not been reproduced or attributed to a single cause.
   is requested at the existing synchronized surface boundary.
 - Android frame-fence and image-acquire waits have a 20 ms budget so a temporarily
   busy GPU/compositor can return control to input and lifecycle handling. Expected
-  timeouts are not reported as errors. Repeated failures are logged on changes.
+  timeouts are not reported as errors. Repeated acquire failures are logged on changes.
 
 Vulkan references: [image-barrier scope/layout rules](https://docs.vulkan.org/refpages/latest/refpages/source/VkImageMemoryBarrier.html)
 and [swapchain image acquisition](https://docs.vulkan.org/refpages/latest/refpages/source/vkAcquireNextImageKHR.html).
@@ -51,7 +51,8 @@ newly generated unrelated development key cannot silently produce an incompatibl
 update.
 
 Local CPU regression tests, virtual-mouse tests and package/preparation tests
-pass. Full native compilation/package validation is pending for this checkpoint.
+pass. Full native compilation, runtime/ELF dependency audits, APK identity, v3
+signing and update-certificate validation passed in [workflow 42001650804](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/42001650804).
 Phone testing of flicker, viewport modes, rotation, background/resume and sustained
 responsiveness remains necessary.
 
