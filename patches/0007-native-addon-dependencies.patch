@@ -1,0 +1,62 @@
+diff --git a/build_files/android/apk/app/build.gradle b/build_files/android/apk/app/build.gradle
+index da0cd8dd..2e6167a1 100644
+--- a/build_files/android/apk/app/build.gradle
++++ b/build_files/android/apk/app/build.gradle
+@@ -24,8 +24,8 @@ android {
+     applicationId 'org.blender.blender'
+     minSdk 31
+     targetSdk 34
+-    versionCode 5020306
+-    versionName '5.2.3-android.6'
++    versionCode 5020307
++    versionName '5.2.3-android.7'
+     ndk { abiFilters 'arm64-v8a' }
+   }
+ 
+diff --git a/build_files/android/apk/package.sh b/build_files/android/apk/package.sh
+index d2a4cd1f..b28faf87 100755
+--- a/build_files/android/apk/package.sh
++++ b/build_files/android/apk/package.sh
+@@ -178,8 +178,8 @@ for bridge in meshopt draco; do
+   if [ -f "$so" ]; then
+     dest="$PAYLOAD/scripts/addons_core/io_scene_gltf2/libbf_intern_${bridge}_bridge.so"
+     cp "$so" "$dest"
+-    # Draco is linked statically and arrives around 25MB, nearly all of it
+-    # debug information no on-device workflow can use.
++    # Strip debug information from bundled codec bridges. Shared codec
++    # dependencies are gathered into jniLibs below.
+     "$ANDROID_LLVM_BIN/llvm-strip" --strip-unneeded "$dest"
+     echo "[apk] bundled the glTF $bridge bridge ($(du -h "$dest" | cut -f1))"
+   fi
+@@ -297,8 +297,9 @@ fi
+ find "$PAYLOAD" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+ 
+ echo "[apk] gathering native libraries (unversioned)"
+-# Seed queue: libblender + c++_shared + every python extension module.
+-for so in $(find "$PAYLOAD/python" -name '*.so'); do
++# Seed from every bundled native module, including glTF codec bridges and USD
++# plugins. Looking only under python/ misses libraries loaded by add-ons.
++for so in $(find "$PAYLOAD" -type f \( -name '*.so' -o -name '*.so.*' \)); do
+   b="$(unversion "$(basename "$so")")"
+   [ -f "$JNI/$b" ] || cp "$so" "$JNI/$b"
+ done
+@@ -334,8 +335,8 @@ patch_unversion() {
+   done
+ }
+ for so in "$JNI"/*.so; do patch_unversion "$so"; done
+-# Python extension modules load from filesDir but resolve NEEDED via jniLibs.
+-for so in $(find "$PAYLOAD/python" -name '*.so'); do
++# Runtime modules load from filesDir but resolve NEEDED via jniLibs.
++for so in $(find "$PAYLOAD" -type f \( -name '*.so' -o -name '*.so.*' \)); do
+   patch_unversion "$so"
+ done
+ 
+@@ -377,7 +378,7 @@ fi
+   "$STAGE/rescompiled/res.zip" \
+   -A "$ASSETS" -0 zip \
+   --min-sdk-version "$ANDROID_API" --target-sdk-version "$ANDROID_TARGET_API" \
+-  --version-code 5020306 --version-name "5.2.3-android.6"
++  --version-code 5020307 --version-name "5.2.3-android.7"
+ 
+ echo "[apk] assembling"
+ cp "$STAGE/base.apk" "$OUT"

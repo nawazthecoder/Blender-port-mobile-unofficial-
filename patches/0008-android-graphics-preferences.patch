@@ -1,0 +1,72 @@
+diff --git a/build_files/android/apk/app/build.gradle b/build_files/android/apk/app/build.gradle
+index 2e6167a1..26283c8c 100644
+--- a/build_files/android/apk/app/build.gradle
++++ b/build_files/android/apk/app/build.gradle
+@@ -24,8 +24,8 @@ android {
+     applicationId 'org.blender.blender'
+     minSdk 31
+     targetSdk 34
+-    versionCode 5020307
+-    versionName '5.2.3-android.7'
++    versionCode 5020308
++    versionName '5.2.3-android.8'
+     ndk { abiFilters 'arm64-v8a' }
+   }
+ 
+diff --git a/build_files/android/apk/package.sh b/build_files/android/apk/package.sh
+index b28faf87..c93a48b9 100755
+--- a/build_files/android/apk/package.sh
++++ b/build_files/android/apk/package.sh
+@@ -378,7 +378,7 @@ fi
+   "$STAGE/rescompiled/res.zip" \
+   -A "$ASSETS" -0 zip \
+   --min-sdk-version "$ANDROID_API" --target-sdk-version "$ANDROID_TARGET_API" \
+-  --version-code 5020307 --version-name "5.2.3-android.7"
++  --version-code 5020308 --version-name "5.2.3-android.8"
+ 
+ echo "[apk] assembling"
+ cp "$STAGE/base.apk" "$OUT"
+diff --git a/source/blender/windowmanager/intern/wm_files.cc b/source/blender/windowmanager/intern/wm_files.cc
+index 686250cd..72ac4c2e 100644
+--- a/source/blender/windowmanager/intern/wm_files.cc
++++ b/source/blender/windowmanager/intern/wm_files.cc
+@@ -505,6 +505,14 @@ static void wm_file_read_setup_wm_finalize(bContext *C,
+ 
+ static void wm_gpu_backend_override_from_userdef()
+ {
++#ifdef __ANDROID__
++  /* Android ships only the Vulkan backend. Desktop factory/imported preferences
++   * otherwise request OpenGL (or Metal), triggering a needless fallback. */
++  if (ELEM(U.gpu_backend, USER_GPU_BACKEND_OPENGL, USER_GPU_BACKEND_METAL)) {
++    U.gpu_backend = USER_GPU_BACKEND_VULKAN;
++  }
++#endif
++
+   /* Check if GPU backend is already set from the command line arguments. The command line
+    * arguments have higher priority than user preferences. */
+   if (GPU_backend_type_selection_is_overridden()) {
+diff --git a/source/blender/windowmanager/intern/wm_window.cc b/source/blender/windowmanager/intern/wm_window.cc
+index 70851c73..d101d66f 100644
+--- a/source/blender/windowmanager/intern/wm_window.cc
++++ b/source/blender/windowmanager/intern/wm_window.cc
+@@ -2443,6 +2443,12 @@ void wm_test_gpu_backend_fallback(bContext *C)
+ 
+     wmWindow *prevwin = CTX_wm_window(C);
+     CTX_wm_window_set(C, win);
++#ifdef __ANDROID__
++    const std::string message = fmt::format(
++        fmt::runtime(RPT_("The requested graphics backend is unavailable. Blender is using {}.")),
++        GPU_backend_get_name());
++    alert(C, RPT_("Graphics backend selection"), message, ui::AlertIcon::Info, false);
++#else
+     std::string message = RPT_("Updating GPU drivers may solve this issue.");
+     message += RPT_(
+         "The graphics backend can be changed in the System section of the Preferences.");
+@@ -2451,6 +2457,7 @@ void wm_test_gpu_backend_fallback(bContext *C)
+           message,
+           ui::AlertIcon::Error,
+           false);
++#endif
+     CTX_wm_window_set(C, prevwin);
+   }
+ }

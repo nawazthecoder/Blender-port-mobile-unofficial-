@@ -1,0 +1,28 @@
+diff --git a/build_files/android/apk/app/build.gradle b/build_files/android/apk/app/build.gradle
+index 6bfa2a5b..da0cd8dd 100644
+--- a/build_files/android/apk/app/build.gradle
++++ b/build_files/android/apk/app/build.gradle
+@@ -24,8 +24,8 @@ android {
+     applicationId 'org.blender.blender'
+     minSdk 31
+     targetSdk 34
+-    versionCode 5020305
+-    versionName '5.2.3-android.5'
++    versionCode 5020306
++    versionName '5.2.3-android.6'
+     ndk { abiFilters 'arm64-v8a' }
+   }
+ 
+diff --git a/build_files/android/apk/package.sh b/build_files/android/apk/package.sh
+index 7283f731..d2a4cd1f 100755
+--- a/build_files/android/apk/package.sh
++++ b/build_files/android/apk/package.sh
+@@ -377,7 +377,7 @@ fi
+   "$STAGE/rescompiled/res.zip" \
+   -A "$ASSETS" -0 zip \
+   --min-sdk-version "$ANDROID_API" --target-sdk-version "$ANDROID_TARGET_API" \
+-  --version-code 5020305 --version-name "5.2.3-android.5"
++  --version-code 5020306 --version-name "5.2.3-android.6"
+ 
+ echo "[apk] assembling"
+ cp "$STAGE/base.apk" "$OUT"

@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "blender_version": "5.2.3",
+  "release_cycle": "release",
+  "source_repository": "https://github.com/blender/blender.git",
+  "source_tag": "v5.2.3",
+  "source_commit": "e13b728c6880d3084d9d57c30031ed5df8b39dee",
+  "android_port_repository": "https://github.com/simfeo/blender.git",
+  "android_port_commit": "4bd0075178bdf71c9aa3de139af6d07e9da61b4d",
+  "android_port_base": "3bcf2d172c1f879561b600d02707617912d22c7d",
+  "patch": "patches/blender-5.2.3-android.patch",
+  "patch_sha256": "961051edc50f57d07f0dea13d43fb8b6b420643040e893050a7ccdfaf26e8314",
+  "android_libraries_commit": "59001bef2a4983d0f42e3281cf622a5734c1cb02",
+  "ndk_version": "30.0.16248370",
+  "vulkan_headers_version": "1.4.341",
+  "android_min_api": 31,
+  "configuration": "full",
+  "port_revision": 11,
+  "status": "revision11-native-build-validated-graphics-device-checks-pending",
+  "additional_patches": [
+    {
+      "path": "patches/0002-stable-build-fixes.patch",
+      "sha256": "8f27482ada8f3a72d1bb117eaaeb68d7c65f8d14b6aabe18eaa33704bd066b37"
+    },
+    {
+      "path": "patches/0003-stable-touch-api.patch",
+      "sha256": "552d5aed5a28a09b0c715ede821451d9df675a52457108038b64993adac50e37"
+    },
+    {
+      "path": "patches/0004-stable-keyboard-headers.patch",
+      "sha256": "684a548555b33177a43e34c6ed1cc011ec996503f36526b0c40b94e279297937"
+    },
+    {
+      "path": "patches/0005-android-vulkan-dispatch.patch",
+      "sha256": "8b2747292360db7e869d5bc6a0e1c8c1f38b01668c485a83157f84afa978bc0c"
+    },
+    {
+      "path": "patches/0006-runtime-payload-revision.patch",
+      "sha256": "8d1fb3f4ce2f2a355e5016f1114893b26c2a4e6b9462d1da487bd486a87eb31f"
+    },
+    {
+      "path": "patches/0007-native-addon-dependencies.patch",
+      "sha256": "baa9b7a577a5e88b66c7a3091fe823dd0dd4b7f637c760286df5c8fa5970d337"
+    },
+    {
+      "path": "patches/0008-android-graphics-preferences.patch",
+      "sha256": "6c5688a1b1b378741c86e40370b2ba546ab59fdb8e8d2a67522d4db58a723321"
+    },
+    {
+      "path": "patches/0009-android-virtual-mouse.patch",
+      "sha256": "d803b641ff34671b4ca7519ec3b1119c78c2f749f791a42b2c905a6f1d4855ac"
+    },
+    {
+      "path": "patches/0010-android-mouse-gestures-and-latency.patch",
+      "sha256": "2f422fd6e8bcef1daa95d2a74f428a310323013ae9e5d09b81c25a0ad9efba25"
+    },
+    {
+      "path": "patches/0011-android-graphics-stability-and-scheduling.patch",
+      "sha256": "8bc8af5aa6143fa208a6b053637a24927930238d6dd2e6a77bf8c69e7ea79c00"
+    }
+  ]
+}
