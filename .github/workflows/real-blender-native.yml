@@ -115,6 +115,13 @@ jobs:
         with:
           path: blender_build_android/android-debug.keystore
           key: android-port-development-signing-v1
+      - name: Restore pinned static denoiser build and downloads
+        id: oidn-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: blender_build_android/oidn-deps
+          key: android-oidn-2.5.0-ispc1.30-api31-r30-59001bef-v2-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: android-oidn-2.5.0-ispc1.30-api31-r30-59001bef-v2-
       - name: Compile full Blender and package Android APK
         id: compile
         working-directory: blender-source
@@ -175,6 +182,12 @@ jobs:
             blender-source/lib/android_arm64
             blender-source/.git/modules/lib
           key: android-libs-5.2.3-59001bef-v1
+      - name: Save denoiser downloads and build progress
+        if: always() && steps.compile.outcome != 'skipped' && steps.oidn-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: blender_build_android/oidn-deps
+          key: android-oidn-2.5.0-ispc1.30-api31-r30-59001bef-v2-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Save compiler progress even after a compile failure
         if: always() && steps.compile.outcome != 'skipped'
         uses: actions/cache/save@v4

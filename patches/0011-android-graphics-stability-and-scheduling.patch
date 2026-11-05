@@ -26,6 +26,63 @@ index 10703e0d..96c56fe2 100755
  
  echo "[apk] assembling"
  cp "$STAGE/base.apk" "$OUT"
+diff --git a/build_files/android/build_oidn.sh b/build_files/android/build_oidn.sh
+index 254f8fa5..daff2c86 100644
+--- a/build_files/android/build_oidn.sh
++++ b/build_files/android/build_oidn.sh
+@@ -40,7 +40,16 @@ mkdir -p "$DEPS"
+ 
+ log() { echo "[oidn] $*"; }
+ 
+-if [ -f "$PREFIX/lib/libOpenImageDenoise_core.a" ]; then
++download() {
++  local url="$1" target="$2"
++  # A failed/retried HTTP response must never be piped into tar or installed as an archive.
++  curl -fL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 \
++    -o "$target.part" "$url"
++  mv -f "$target.part" "$target"
++}
++
++if [ -f "$PREFIX/.blender-android-oidn-complete" ] && \
++   [ -f "$PREFIX/lib/libOpenImageDenoise_core.a" ]; then
+   log "OpenImageDenoise $OIDN_VERSION already built"
+   echo "BLENDER_ANDROID_OIDN_ROOT=$PREFIX" >&3
+   exit 0
+@@ -49,10 +58,14 @@ fi
+ # --- ISPC (host compiler for the CPU kernels) --------------------------------
+ if [ ! -x "$ISPC" ]; then
+   log "downloading ISPC $ISPC_VERSION"
++  ISPC_ARCHIVE="$DEPS/ispc-v$ISPC_VERSION-linux.tar.gz"
++  if [ ! -f "$ISPC_ARCHIVE" ] || ! tar -tzf "$ISPC_ARCHIVE" >/dev/null 2>&1; then
++    download "https://github.com/ispc/ispc/releases/download/v$ISPC_VERSION/ispc-v$ISPC_VERSION-linux.tar.gz" "$ISPC_ARCHIVE"
++  fi
++  tar -tzf "$ISPC_ARCHIVE" >/dev/null
+   rm -rf "$ISPC_DIR"
+   mkdir -p "$ISPC_DIR"
+-  curl -fL "https://github.com/ispc/ispc/releases/download/v$ISPC_VERSION/ispc-v$ISPC_VERSION-linux.tar.gz" \
+-    | tar -xz -C "$ISPC_DIR" --strip-components=1
++  tar -xzf "$ISPC_ARCHIVE" -C "$ISPC_DIR" --strip-components=1
+ fi
+ # The help text wraps the OS list, so join it before matching.
+ if ! "$ISPC" --help | tr '\n' ' ' | grep -q -- '--target-os=[^[]*android'; then
+@@ -64,9 +77,7 @@ fi
+ TARBALL="$DEPS/oidn-$OIDN_VERSION.src.tar.gz"
+ if [ ! -f "$TARBALL" ]; then
+   log "downloading OpenImageDenoise $OIDN_VERSION source"
+-  curl -fL -o "$TARBALL.part" \
+-    "https://github.com/RenderKit/oidn/releases/download/v$OIDN_VERSION/oidn-$OIDN_VERSION.src.tar.gz"
+-  mv "$TARBALL.part" "$TARBALL"
++  download "https://github.com/RenderKit/oidn/releases/download/v$OIDN_VERSION/oidn-$OIDN_VERSION.src.tar.gz" "$TARBALL"
+ fi
+ echo "$OIDN_MD5  $TARBALL" | md5sum -c -
+ 
+@@ -101,5 +112,6 @@ cmake -S "$SRC" -B "$BUILD" -G Ninja \
+ log "building OpenImageDenoise $OIDN_VERSION"
+ ninja -j "${BLENDER_BUILD_JOBS:-2}" -C "$BUILD" install
+ 
++touch "$PREFIX/.blender-android-oidn-complete"
+ log "installed: $PREFIX"
+ echo "BLENDER_ANDROID_OIDN_ROOT=$PREFIX" >&3
 diff --git a/intern/ghost/CMakeLists.txt b/intern/ghost/CMakeLists.txt
 index 25022566..f18af331 100644
 --- a/intern/ghost/CMakeLists.txt

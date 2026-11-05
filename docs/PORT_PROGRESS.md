@@ -247,3 +247,9 @@ Polyvra and Forge Mobile Studio have not been modified.
 - Preserve application ID and enforce the revision 9/10 signing certificate
   fingerprint so incompatible updates cannot be uploaded silently.
 - Details and primary Vulkan references: docs/GRAPHICS_STABILITY.md.
+
+- Initial revision 11 CI 42000537825 passed unit, mouse and new Vulkan-helper
+  regressions. Compilation was blocked before C++ work by an ISPC release download
+  returning HTTP 504. The download path now retries into a temporary file, validates
+  the archive before extracting, and caches pinned OIDN/ISPC build progress. An
+  install-complete marker prevents partial denoiser installs from being reused.
