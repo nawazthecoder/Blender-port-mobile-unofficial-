@@ -104,6 +104,10 @@ jobs:
           tar -xzf /tmp/vulkan-headers.tar.gz -C /tmp/vulkan-headers
           cp -R /tmp/vulkan-headers/Vulkan-Headers-1.4.341/include \
             blender_build_android/lib/vulkan_headers/include
+      - name: Check Vulkan synchronization and image acquisition regressions
+        run: >-
+          python3 user-repo/tests/android_vulkan_regressions.py blender-source
+          --vulkan-include blender_build_android/lib/vulkan_headers/include
       # Public development signing identity, retained for installable future updates.
       - name: Restore Android port development signing key
         id: signing-cache
@@ -135,10 +139,19 @@ jobs:
           from pathlib import Path
           identity = Path('artifacts/apk-identity.txt').read_text()
           assert "package: name='org.blender.androidport'" in identity, identity[:500]
-          assert "versionCode='5020310'" in identity, identity[:500]
+          assert "versionCode='5020311'" in identity, identity[:500]
           assert "application-label:'Blender Android'" in identity, identity[:500]
           PYCODE
           "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --print-certs artifacts/blender-5.2.3-android-full.apk > artifacts/signing-certificate.txt
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import re
+          certificate = Path('artifacts/signing-certificate.txt').read_text()
+          actual = re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-fA-F]+)', certificate).group(1).lower()
+          expected = Path('user-repo/config/android-development-certificate.sha256').read_text().strip()
+          assert actual == expected, 'Signing identity changed: this APK would not update Blender Android'
+          PYCODE
+          cp user-repo/docs/GRAPHICS_STABILITY.md artifacts/
           cp user-repo/docs/VIRTUAL_MOUSE.md artifacts/
           cp user-repo/config/blender-android.json artifacts/source-lock.json
           git -C user-repo rev-parse HEAD > artifacts/port-repository-commit.txt

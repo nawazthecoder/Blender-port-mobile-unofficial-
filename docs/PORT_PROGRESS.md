@@ -229,3 +229,21 @@ Polyvra and Forge Mobile Studio have not been modified.
   The download was checked against the CI ZIP/APK digests and saved.
 - Gesture behavior, menu visibility and latency on the phone still need device
   testing; no measured FPS or end-to-end latency is claimed.
+
+
+## Revision 11 — transient graphics and scheduling
+
+- User reports intermittent brief graphics glitches and requests more optimization.
+  The phone incident is not yet reproduced; do not claim a confirmed single cause.
+- Fix image-handle-only barrier merging dropping independent mip/layer/aspect
+  transitions. Keep temporary subresource state separate from whole-image state,
+  synchronize matching ranges and repeated writes, and preserve depth/stencil access.
+- Check acquired-image ownership and fence results, bound stale-swapchain retries,
+  and skip drawing after failure. Request Android surface recovery at swap boundary.
+- Use interruptible native idle waits and skip UI drawing while paused/windowless;
+  background jobs/timers continue at a lower cadence.
+- Add sanitizer-backed CPU Vulkan helper regression fixtures; mouse and 16 existing
+  preparation/package tests pass. Full native build and phone verification pending.
+- Preserve application ID and enforce the revision 9/10 signing certificate
+  fingerprint so incompatible updates cannot be uploaded silently.
+- Details and primary Vulkan references: docs/GRAPHICS_STABILITY.md.

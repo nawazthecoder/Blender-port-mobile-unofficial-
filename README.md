@@ -21,6 +21,11 @@ phone validation.
 Validated build: [revision 10 gesture mouse workflow](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/41589347500).
 The full ARM64 APK is available in its `blender-5.2.3-android-full-arm64` artifact.
 
+**Graphics stability:** revision 11 fixes image subresource synchronization and
+invalid frame acquisition, and adds Android idle/background scheduling improvements.
+See [graphics changes and validation](docs/GRAPHICS_STABILITY.md). Native build and
+phone validation for revision 11 are pending.
+
 ## Build the full editor
 
 Use **Actions → Build Blender 5.2.3 Full Android Editor**. Changes to its locked

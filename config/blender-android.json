@@ -15,8 +15,8 @@
   "vulkan_headers_version": "1.4.341",
   "android_min_api": 31,
   "configuration": "full",
-  "port_revision": 10,
-  "status": "revision10-native-build-validated-gesture-device-checks-pending",
+  "port_revision": 11,
+  "status": "revision11-graphics-stability-native-build-pending",
   "additional_patches": [
     {
       "path": "patches/0002-stable-build-fixes.patch",
@@ -53,6 +53,10 @@
     {
       "path": "patches/0010-android-mouse-gestures-and-latency.patch",
       "sha256": "2f422fd6e8bcef1daa95d2a74f428a310323013ae9e5d09b81c25a0ad9efba25"
+    },
+    {
+      "path": "patches/0011-android-graphics-stability-and-scheduling.patch",
+      "sha256": "15162caad785430bd2a3bc792131ac0ece467bdad513b958f37b93680da01c84"
     }
   ]
 }
