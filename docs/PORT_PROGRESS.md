@@ -333,3 +333,9 @@ Second 5.3 run 43198483153 built/found pybind11 3.0.1, then exposed the minizip
 CMake package-name difference caused by disabling its compatibility layer. The
 builder now mirrors the official release's minizip options/header layout and
 enables that compatibility layer for the package name OpenTimelineIO expects.
+
+Third 5.3 run 43199333680 compiled OpenTimelineIO and both Python bindings.
+The Android module link correctly rejected unresolved CPython symbols because
+the desktop Python::Module target omitted libpython. The Android-only CMake
+patch now links the pinned target Python shared library explicitly for those
+bindings. Completed native compilation remains cached.

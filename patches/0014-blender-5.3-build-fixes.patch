@@ -1,8 +1,8 @@
 diff --git a/build_files/android/build_release_dependencies.py b/build_files/android/build_release_dependencies.py
-index db1b85b4..868af69d 100644
+index db1b85b4..d7464655 100644
 --- a/build_files/android/build_release_dependencies.py
 +++ b/build_files/android/build_release_dependencies.py
-@@ -129,17 +129,31 @@ def main():
+@@ -129,19 +129,34 @@ def main():
                       options=('-DRAPIDJSON_BUILD_DOC=OFF', '-DRAPIDJSON_BUILD_EXAMPLES=OFF',
                                '-DRAPIDJSON_BUILD_TESTS=OFF'),
                       required=('include/rapidjson/document.h',))
@@ -34,9 +34,13 @@ index db1b85b4..868af69d 100644
 +                     required=('include/pybind11/pybind11.h',
 +                               'share/cmake/pybind11/pybind11Config.cmake'))
      otio = build('OPENTIMELINEIO', 'opentimelineio',
-           patches=('opentimelineio.diff', 'opentimelineio_shared.diff'),
+-          patches=('opentimelineio.diff', 'opentimelineio_shared.diff'),
++          patches=('opentimelineio.diff', 'opentimelineio_shared.diff',
++                   'opentimelineio_android_python.diff'),
            options=('-DOTIO_SHARED_LIBS=ON', '-DOTIO_AUTOMATIC_SUBMODULES=OFF',
-@@ -151,7 +165,7 @@ def main():
+                    '-DBUILD_TESTING=OFF', '-DOTIO_CXX_INSTALL=ON', '-DOTIO_PYTHON_INSTALL=ON',
+                    '-DOTIO_DEPENDENCIES_INSTALL=OFF', '-DOTIO_FIND_PYBIND11=ON',
+@@ -151,7 +166,7 @@ def main():
                     f'-DPython_INCLUDE_DIR={LIBDIR}/python/include/python3.13',
                     f'-DPython_LIBRARY={LIBDIR}/python/lib/libpython3.13.so',
                     f'-DOTIO_PYTHON_INSTALL_DIR={LIBDIR}/opentimelineio/python',
@@ -45,6 +49,26 @@ index db1b85b4..868af69d 100644
                     f'-DRapidJSON_ROOT={rapidjson}', f'-Dminizip-ng_ROOT={minizip}',
                     f'-DZLIB_ROOT={LIBDIR}/zlib'),
            required=('lib/libopentimelineio.so*', 'python/opentimelineio/__init__.py'))
+diff --git a/build_files/build_environment/patches/opentimelineio_android_python.diff b/build_files/build_environment/patches/opentimelineio_android_python.diff
+new file mode 100644
+index 00000000..4965a5f0
+--- /dev/null
++++ b/build_files/build_environment/patches/opentimelineio_android_python.diff
+@@ -0,0 +1,14 @@
++diff --git a/CMakeLists.txt b/CMakeLists.txt
++--- a/CMakeLists.txt
+++++ b/CMakeLists.txt
++@@ -67,3 +67,10 @@
++     find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
+++    if(ANDROID)
+++        # Android modules must name their embedded Python runtime explicitly.
+++        if(NOT Python_LIBRARY OR NOT EXISTS "${Python_LIBRARY}")
+++            message(FATAL_ERROR "Android OTIO needs the target Python shared library")
+++        endif()
+++        set_property(TARGET Python::Module APPEND PROPERTY INTERFACE_LINK_LIBRARIES "${Python_LIBRARY}")
+++    endif()
++     message(STATUS "Python_INCLUDE_DIRS: ${Python_INCLUDE_DIRS}")
++     message(STATUS "Python_VERSION: ${Python_VERSION}")
 diff --git a/source/blender/gpu/vulkan/vk_backend.cc b/source/blender/gpu/vulkan/vk_backend.cc
 index 786b6ed9..dee19f5c 100644
 --- a/source/blender/gpu/vulkan/vk_backend.cc
