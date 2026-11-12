@@ -17,7 +17,12 @@
   "configuration": "full",
   "port_revision": 13,
   "status": "revision13-official-5.3.0-migration-native-build-pending",
-  "additional_patches": [],
+  "additional_patches": [
+    {
+      "path": "patches/0014-blender-5.3-build-fixes.patch",
+      "sha256": "8c03f9712b2caad7e8a9212890f6f343d8cdb1402902bcdb39a4ecd479b0d0ce"
+    }
+  ],
   "host_libraries_commit": "e92f1a54a92c774fbeb0cf51c4652bc510d9a50a",
   "supplemental_android_dependencies": [
     "Jolt 5.6.0",

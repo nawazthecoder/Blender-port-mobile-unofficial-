@@ -322,3 +322,9 @@ Vulkan stability and crash diagnostics changes are adapted to 5.3's Volk/resourc
 APIs. Jolt, OpenTimelineIO and KTX dependencies are built from the official source
 locks. See docs/UPGRADE_5_3.md. Local regression checks and clean source preparation
 pass; the full native build and a new phone APK test are pending.
+
+First 5.3 run 43197321739 reached new dependency compilation. Jolt, RapidJSON
+and minizip-ng built successfully; OpenTimelineIO configuration lacked pybind11's
+CMake package in the old Android payload. The follow-up builds the header-only
+pybind11 package from the official source lock and caches it explicitly. A stale
+unused Vulkan flag assignment was also removed before native compilation.

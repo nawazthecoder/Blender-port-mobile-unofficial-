@@ -1,0 +1,36 @@
+diff --git a/build_files/android/build_release_dependencies.py b/build_files/android/build_release_dependencies.py
+index db1b85b4..920a948e 100644
+--- a/build_files/android/build_release_dependencies.py
++++ b/build_files/android/build_release_dependencies.py
+@@ -140,6 +140,10 @@ def main():
+     host_python = SOURCE / 'lib/linux_x64/python/bin/python3.13'
+     if not host_python.is_file():
+         raise RuntimeError('Matching host Python 3.13 is required for OTIO bindings')
++    pybind11 = build('PYBIND11', 'pybind1153',
++                     options=('-DPYBIND11_TEST=OFF', '-DPYBIND11_NOPYTHON=ON'),
++                     required=('include/pybind11/pybind11.h',
++                               'share/cmake/pybind11/pybind11Config.cmake'))
+     otio = build('OPENTIMELINEIO', 'opentimelineio',
+           patches=('opentimelineio.diff', 'opentimelineio_shared.diff'),
+           options=('-DOTIO_SHARED_LIBS=ON', '-DOTIO_AUTOMATIC_SUBMODULES=OFF',
+@@ -151,7 +155,7 @@ def main():
+                    f'-DPython_INCLUDE_DIR={LIBDIR}/python/include/python3.13',
+                    f'-DPython_LIBRARY={LIBDIR}/python/lib/libpython3.13.so',
+                    f'-DOTIO_PYTHON_INSTALL_DIR={LIBDIR}/opentimelineio/python',
+-                   f'-DImath_ROOT={LIBDIR}/imath', f'-Dpybind11_ROOT={LIBDIR}/pybind11',
++                   f'-DImath_ROOT={LIBDIR}/imath', f'-Dpybind11_ROOT={pybind11}',
+                    f'-DRapidJSON_ROOT={rapidjson}', f'-Dminizip-ng_ROOT={minizip}',
+                    f'-DZLIB_ROOT={LIBDIR}/zlib'),
+           required=('lib/libopentimelineio.so*', 'python/opentimelineio/__init__.py'))
+diff --git a/source/blender/gpu/vulkan/vk_backend.cc b/source/blender/gpu/vulkan/vk_backend.cc
+index 786b6ed9..dee19f5c 100644
+--- a/source/blender/gpu/vulkan/vk_backend.cc
++++ b/source/blender/gpu/vulkan/vk_backend.cc
+@@ -670,7 +670,6 @@ void VKBackend::detect_workarounds(VKDevice &device)
+   extensions.dynamic_rendering_unused_attachments =
+       extensions.dynamic_rendering &&
+       device.supports_extension(VK_EXT_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_EXTENSION_NAME);
+-  extensions.logic_ops = device.physical_device_features_get().logicOp;
+   extensions.maintenance4 = device.supports_extension(VK_KHR_MAINTENANCE_4_EXTENSION_NAME);
+   extensions.memory_priority = device.supports_extension(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME);
+   extensions.pageable_device_local_memory = device.supports_extension(
