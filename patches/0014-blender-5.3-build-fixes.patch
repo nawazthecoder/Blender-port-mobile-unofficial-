@@ -90,6 +90,21 @@ index 00000000..4965a5f0
 ++    endif()
 +     message(STATUS "Python_INCLUDE_DIRS: ${Python_INCLUDE_DIRS}")
 +     message(STATUS "Python_VERSION: ${Python_VERSION}")
+diff --git a/intern/ghost/intern/GHOST_ContextVK.cc b/intern/ghost/intern/GHOST_ContextVK.cc
+index 1bf24d3f..c6a604f7 100644
+--- a/intern/ghost/intern/GHOST_ContextVK.cc
++++ b/intern/ghost/intern/GHOST_ContextVK.cc
+@@ -426,8 +426,8 @@ struct GHOST_InstanceVK {
+      * used on the very devices that have it in core. Extensions are unaffected,
+      * which is why the KHR path on older devices never showed this. */
+     uint32_t loader_api_version = VK_API_VERSION_1_0;
+-    if (vkEnumerateInstanceVersion != nullptr &&
+-        vkEnumerateInstanceVersion(&loader_api_version) == VK_SUCCESS)
++    if (volk::vkEnumerateInstanceVersion != nullptr &&
++        volk::vkEnumerateInstanceVersion(&loader_api_version) == VK_SUCCESS)
+     {
+       const uint32_t highest_known = loader_api_version < uint32_t(VK_API_VERSION_1_3) ?
+                                          loader_api_version :
 diff --git a/source/blender/gpu/vulkan/vk_backend.cc b/source/blender/gpu/vulkan/vk_backend.cc
 index 786b6ed9..dee19f5c 100644
 --- a/source/blender/gpu/vulkan/vk_backend.cc

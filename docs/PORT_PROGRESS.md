@@ -343,4 +343,8 @@ bindings. Completed native compilation remains cached.
 Fourth 5.3 run 43200505045 linked and installed OpenTimelineIO and its Android
 Python extensions. KTX configuration then needed a Zstandard CMake package that
 the old target payload did not provide. The builder now installs pinned Zstd
-1.5.7 with a static target/config package and adapts its target alias for KTX.
+1.5.7 with a static target/config package and uses that package for KTX.
+
+A local compiler probe also caught an ambiguous Vulkan loader-version query
+after the Volk namespace migration. The query now explicitly uses the loader
+namespace; the corrected probe compiles with the pinned Vulkan headers.
