@@ -20,7 +20,7 @@
   "additional_patches": [
     {
       "path": "patches/0014-blender-5.3-build-fixes.patch",
-      "sha256": "8c03f9712b2caad7e8a9212890f6f343d8cdb1402902bcdb39a4ecd479b0d0ce"
+      "sha256": "1a7a65b2fd268491478093b7e871b7679daf98d9c300f0105714ca3c5811062b"
     }
   ],
   "host_libraries_commit": "e92f1a54a92c774fbeb0cf51c4652bc510d9a50a",
@@ -29,7 +29,8 @@
     "OpenTimelineIO 31e3101e750be2aa992274ac02c0679077872e57",
     "KTX 4.4.2",
     "RapidJSON 24b5e7a8b27f42fa16b96fc70aade9106cf7102f",
-    "minizip-ng 4.2.2"
+    "minizip-ng 4.2.2",
+    "pybind11 3.0.1"
   ],
   "previous_validated_source_commit": "9c93feb403b4ca0f96ab5dc63e391c4b3978c57c"
 }

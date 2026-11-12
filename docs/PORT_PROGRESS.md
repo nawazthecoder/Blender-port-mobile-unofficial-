@@ -328,3 +328,8 @@ and minizip-ng built successfully; OpenTimelineIO configuration lacked pybind11'
 CMake package in the old Android payload. The follow-up builds the header-only
 pybind11 package from the official source lock and caches it explicitly. A stale
 unused Vulkan flag assignment was also removed before native compilation.
+
+Second 5.3 run 43198483153 built/found pybind11 3.0.1, then exposed the minizip
+CMake package-name difference caused by disabling its compatibility layer. The
+builder now mirrors the official release's minizip options/header layout and
+enables that compatibility layer for the package name OpenTimelineIO expects.

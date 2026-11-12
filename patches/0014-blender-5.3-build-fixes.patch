@@ -1,8 +1,31 @@
 diff --git a/build_files/android/build_release_dependencies.py b/build_files/android/build_release_dependencies.py
-index db1b85b4..920a948e 100644
+index db1b85b4..868af69d 100644
 --- a/build_files/android/build_release_dependencies.py
 +++ b/build_files/android/build_release_dependencies.py
-@@ -140,6 +140,10 @@ def main():
+@@ -129,17 +129,31 @@ def main():
+                      options=('-DRAPIDJSON_BUILD_DOC=OFF', '-DRAPIDJSON_BUILD_EXAMPLES=OFF',
+                               '-DRAPIDJSON_BUILD_TESTS=OFF'),
+                      required=('include/rapidjson/document.h',))
++    zlib_candidates = [LIBDIR / 'zlib/lib/libz.a', LIBDIR / 'zlib/lib/libz.so']
++    zlib_candidates.extend(sorted((LIBDIR / 'zlib/lib').glob('libz.so.*')))
++    zlib_library = next((p for p in zlib_candidates if p.is_file()), None)
++    if zlib_library is None:
++        raise RuntimeError('The pinned Android Zlib library is missing')
+     minizip = build('MINIZIPNG', 'minizipng53',
+                     options=('-DBUILD_SHARED_LIBS=OFF', '-DMZ_BUILD_TESTS=OFF',
+                              '-DMZ_BUILD_UNIT_TESTS=OFF', '-DMZ_BUILD_FUZZ_TESTS=OFF',
+-                             '-DMZ_COMPAT=OFF', '-DMZ_ZLIB=ON', '-DMZ_BZIP2=OFF',
++                             '-DMZ_COMPAT=ON', '-DMZ_ZLIB=ON', '-DMZ_BZIP2=OFF',
+                              '-DMZ_LZMA=OFF', '-DMZ_ZSTD=OFF', '-DMZ_OPENSSL=OFF',
+                              '-DMZ_LIBBSD=OFF', '-DMZ_PKCRYPT=OFF', '-DMZ_WZAES=OFF',
+-                             f'-DZLIB_ROOT={LIBDIR}/zlib'),
++                             '-DMZ_FETCH_LIBS=OFF', '-DMZ_LIBCOMP=OFF', '-DMZ_SIGNING=OFF',
++                             '-DMZ_PPMD=OFF', '-DMZ_ICONV=OFF', '-DMZ_ZLIB_FLAVOR=zlib',
++                             '-DCMAKE_INSTALL_INCLUDEDIR=include/minizip-ng',
++                             f'-DZLIB_ROOT={LIBDIR}/zlib',
++                             f'-DZLIB_LIBRARY={zlib_library}',
++                             f'-DZLIB_INCLUDE_DIR={LIBDIR}/zlib/include'),
+                     required=('lib/libminizip*.a',))
      host_python = SOURCE / 'lib/linux_x64/python/bin/python3.13'
      if not host_python.is_file():
          raise RuntimeError('Matching host Python 3.13 is required for OTIO bindings')
@@ -13,7 +36,7 @@ index db1b85b4..920a948e 100644
      otio = build('OPENTIMELINEIO', 'opentimelineio',
            patches=('opentimelineio.diff', 'opentimelineio_shared.diff'),
            options=('-DOTIO_SHARED_LIBS=ON', '-DOTIO_AUTOMATIC_SUBMODULES=OFF',
-@@ -151,7 +155,7 @@ def main():
+@@ -151,7 +165,7 @@ def main():
                     f'-DPython_INCLUDE_DIR={LIBDIR}/python/include/python3.13',
                     f'-DPython_LIBRARY={LIBDIR}/python/lib/libpython3.13.so',
                     f'-DOTIO_PYTHON_INSTALL_DIR={LIBDIR}/opentimelineio/python',
