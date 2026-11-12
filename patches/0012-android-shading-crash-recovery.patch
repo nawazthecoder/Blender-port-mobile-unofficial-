@@ -1,0 +1,456 @@
+diff --git a/build_files/android/apk/app/build.gradle b/build_files/android/apk/app/build.gradle
+index f135880f..b68dc9e2 100644
+--- a/build_files/android/apk/app/build.gradle
++++ b/build_files/android/apk/app/build.gradle
+@@ -24,8 +24,8 @@ android {
+     applicationId 'org.blender.androidport'
+     minSdk 31
+     targetSdk 34
+-    versionCode 5020311
+-    versionName '5.2.3-android.11'
++    versionCode 5020312
++    versionName '5.2.3-android.12'
+     ndk { abiFilters 'arm64-v8a' }
+   }
+ 
+diff --git a/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java b/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java
+index 39805992..b43bcdc2 100644
+--- a/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java
++++ b/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java
+@@ -5,6 +5,8 @@
+ package org.blender.blender;
+ 
+ import android.app.NativeActivity;
++import android.app.ActivityManager;
++import android.app.ApplicationExitInfo;
+ import android.content.Context;
+ import android.content.Intent;
+ import android.content.pm.ActivityInfo;
+@@ -37,6 +39,9 @@ import java.io.File;
+ import java.io.FileOutputStream;
+ import java.io.InputStream;
+ import java.io.OutputStream;
++import java.nio.file.Files;
++import java.nio.file.StandardCopyOption;
++import java.util.List;
+ import java.util.zip.ZipEntry;
+ import java.util.zip.ZipInputStream;
+ 
+@@ -83,6 +88,7 @@ public class BlenderActivity extends NativeActivity {
+     /* Also before super.onCreate: the native side reads it while building argv. */
+     publishLaunchFile(getIntent());
+     super.onCreate(state);
++    new Thread(this::recordPreviousProcessExit, "BlenderExitReport").start();
+     announceLogPath();
+     /* Sensor variant, so the tablet can be picked up from either side. Plain
+      * LANDSCAPE names one direction, which leaves the app upside down after a
+@@ -531,7 +537,17 @@ public class BlenderActivity extends NativeActivity {
+        * all-files permission is granted, and that fails at open, not here. */
+       dir.mkdirs();
+       File candidate = new File(dir, "blender-startup.log");
+-      try (FileOutputStream probe = new FileOutputStream(candidate)) {
++      /* Testing writability must not erase the failed session's log. */
++      try (FileOutputStream probe = new FileOutputStream(candidate, true)) {
++        if (candidate.length() > 0) {
++          try {
++            Files.copy(candidate.toPath(), new File(dir, "blender-previous.log").toPath(),
++                       StandardCopyOption.REPLACE_EXISTING);
++          }
++          catch (Exception ex) {
++            Log.w(TAG, "could not preserve previous session log", ex);
++          }
++        }
+         logPath = candidate.getAbsolutePath();
+         break;
+       }
+@@ -545,6 +561,68 @@ public class BlenderActivity extends NativeActivity {
+     }
+   }
+ 
++  /* Android records native crashes, ANRs and low-memory process deaths. Export
++   * the newest exit on the next launch so a phone-only report needs no adb.
++   * A native trace may be binary; keep it separate from the readable summary. */
++  private void recordPreviousProcessExit() {
++    if (logPath == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
++      return;
++    }
++    try {
++      ActivityManager manager = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
++      if (manager == null) {
++        return;
++      }
++      List<ApplicationExitInfo> exits =
++          manager.getHistoricalProcessExitReasons(getPackageName(), 0, 8);
++      long recorded = getPreferences(MODE_PRIVATE).getLong("lastReportedExit", 0);
++      for (ApplicationExitInfo exit : exits) {
++        if (!getApplicationInfo().processName.equals(exit.getProcessName()) ||
++            exit.getTimestamp() <= recorded)
++        {
++          continue;
++        }
++        File directory = new File(logPath).getParentFile();
++        File report = new File(directory, "blender-last-exit.txt");
++        String summary = "Blender Android previous process exit\n"
++            + "time=" + new java.util.Date(exit.getTimestamp()) + "\n"
++            + "reason=" + exit.getReason() + "\n"
++            + "status=" + exit.getStatus() + "\n"
++            + "description=" + exit.getDescription() + "\n"
++            + "pss_kib=" + exit.getPss() + "\n"
++            + "rss_kib=" + exit.getRss() + "\n"
++            + "device=" + Build.MANUFACTURER + " " + Build.MODEL + "\n"
++            + "android=" + Build.VERSION.RELEASE + "\n";
++        try (FileOutputStream output = new FileOutputStream(report)) {
++          output.write(summary.getBytes(java.nio.charset.StandardCharsets.UTF_8));
++        }
++        File trace = new File(directory, "blender-last-exit.trace");
++        Files.deleteIfExists(trace.toPath());
++        try (InputStream input = exit.getTraceInputStream()) {
++          if (input != null) {
++            try (FileOutputStream output = new FileOutputStream(trace)) {
++              byte[] buffer = new byte[8192];
++              int remaining = 2 * 1024 * 1024;
++              int count;
++              while (remaining > 0 &&
++                     (count = input.read(buffer, 0, Math.min(buffer.length, remaining))) > 0)
++              {
++                output.write(buffer, 0, count);
++                remaining -= count;
++              }
++            }
++          }
++        }
++        getPreferences(MODE_PRIVATE).edit()
++            .putLong("lastReportedExit", exit.getTimestamp()).apply();
++        break;
++      }
++    }
++    catch (Exception ex) {
++      Log.w(TAG, "previous exit report unavailable", ex);
++    }
++  }
++
+   /* Renders aimed at the factory "/tmp/" output land here, next to the log, because the
+    * probe above has just proven the folder writable and a file manager can reach it. */
+   private void publishOutputDir(File parent) {
+diff --git a/build_files/android/apk/package.sh b/build_files/android/apk/package.sh
+index 96c56fe2..2163fc90 100755
+--- a/build_files/android/apk/package.sh
++++ b/build_files/android/apk/package.sh
+@@ -378,7 +378,7 @@ fi
+   "$STAGE/rescompiled/res.zip" \
+   -A "$ASSETS" -0 zip \
+   --min-sdk-version "$ANDROID_API" --target-sdk-version "$ANDROID_TARGET_API" \
+-  --version-code 5020311 --version-name "5.2.3-android.11"
++  --version-code 5020312 --version-name "5.2.3-android.12"
+ 
+ echo "[apk] assembling"
+ cp "$STAGE/base.apk" "$OUT"
+diff --git a/source/blender/gpu/CMakeLists.txt b/source/blender/gpu/CMakeLists.txt
+index 6b37d73a..17a873a6 100644
+--- a/source/blender/gpu/CMakeLists.txt
++++ b/source/blender/gpu/CMakeLists.txt
+@@ -363,6 +363,7 @@ set(VULKAN_SRC
+   vulkan/vk_samplers.hh
+   vulkan/vk_shader.hh
+   vulkan/vk_shader_compiler.hh
++  vulkan/vk_shader_runtime.hh
+   vulkan/vk_shader_interface.hh
+   vulkan/vk_shader_log.hh
+   vulkan/vk_shader_module.hh
+diff --git a/source/blender/gpu/vulkan/vk_backend.cc b/source/blender/gpu/vulkan/vk_backend.cc
+index 2f0f0b5e..f3754515 100644
+--- a/source/blender/gpu/vulkan/vk_backend.cc
++++ b/source/blender/gpu/vulkan/vk_backend.cc
+@@ -13,6 +13,10 @@
+ #include <sstream>
+ #include <string>
+ 
++#ifdef __ANDROID__
++#  include <unistd.h>
++#endif
++
+ #ifdef WITH_ADRENOTOOLS
+ #  include <adrenotools/driver.h>
+ #  include <android/log.h>
+@@ -42,6 +46,7 @@
+ #include "vk_pixel_buffer.hh"
+ #include "vk_query.hh"
+ #include "vk_shader.hh"
++#include "vk_shader_runtime.hh"
+ #include "vk_state_manager.hh"
+ #include "vk_storage_buffer.hh"
+ #include "vk_texture.hh"
+@@ -1110,6 +1115,24 @@ void VKBackend::capabilities_init(VKDevice &device)
+   GCaps.storage_buffer_alignment = limits.minStorageBufferOffsetAlignment;
+ 
+   GCaps.max_parallel_compilations = BLI_system_thread_count();
++#ifdef __ANDROID__
++  /* Material Preview starts many compiler jobs at once. Their temporary host
++   * allocations share RAM with GPU textures on Android. Keep the burst bounded. */
++  const long pages = sysconf(_SC_PHYS_PAGES);
++  const long page_size = sysconf(_SC_PAGE_SIZE);
++  const uint64_t memory_bytes = pages > 0 && page_size > 0 ?
++                                    uint64_t(pages) * uint64_t(page_size) :
++                                    0;
++  GCaps.max_parallel_compilations = vk_android_shader_compile_workers(
++      GCaps.max_parallel_compilations, memory_bytes);
++  const VKShaderTarget target = vk_shader_target(
++      properties.apiVersion,
++      GPU_type_matches(GPU_DEVICE_QUALCOMM, GPU_OS_ANY, GPU_DRIVER_ANY));
++  CLOG_INFO(&LOG,
++            "Android shaders: target=%s, compiler workers=%d",
++            target.cache_directory,
++            GCaps.max_parallel_compilations);
++#endif
+   GCaps.mem_stats_support = true;
+ 
+   uint32_t vk_extension_count;
+diff --git a/source/blender/gpu/vulkan/vk_pipeline_pool.cc b/source/blender/gpu/vulkan/vk_pipeline_pool.cc
+index f84e150a..909175ea 100644
+--- a/source/blender/gpu/vulkan/vk_pipeline_pool.cc
++++ b/source/blender/gpu/vulkan/vk_pipeline_pool.cc
+@@ -26,6 +26,7 @@
+ #include "vk_backend.hh"
+ #include "vk_graphics_pipeline.hh"
+ #include "vk_pipeline_pool.hh"
++#include "vk_shader_runtime.hh"
+ #include "vk_to_string.hh"
+ 
+ namespace blender {
+@@ -856,15 +857,25 @@ void VKPipelinePool::read_from_disk()
+   /* Read cached binary. */
+   fstream file(cache_file, std::ios::binary | std::ios::in | std::ios::ate);
+   std::streamsize data_size = file.tellg();
++  if (data_size <= std::streamsize(sizeof(VKPipelineCachePrefixHeader)) ||
++      data_size > VK_PIPELINE_CACHE_MAX_BYTES)
++  {
++    return;
++  }
+   file.seekg(0, std::ios::beg);
+   Vector<char> buffer(data_size);
+-  file.read(buffer.data(), data_size);
++  if (!file.read(buffer.data(), data_size)) {
++    return;
++  }
+   file.close();
+ 
+   /* Validate the prefix header. */
+   VKPipelineCachePrefixHeader prefix;
+-  VKPipelineCachePrefixHeader &read_prefix = *reinterpret_cast<VKPipelineCachePrefixHeader *>(
+-      buffer.data());
++  VKPipelineCachePrefixHeader read_prefix;
++  memcpy(&read_prefix, buffer.data(), sizeof(read_prefix));
++  if (!vk_pipeline_cache_size_valid(data_size, sizeof(read_prefix), read_prefix.data_size)) {
++    return;
++  }
+   prefix.data_size = read_prefix.data_size;
+   if (memcmp(&read_prefix, &prefix, sizeof(VKPipelineCachePrefixHeader)) != 0) {
+     /* Headers are different, most likely the cache will not work and potentially crash the driver.
+@@ -884,7 +895,12 @@ void VKPipelinePool::read_from_disk()
+   create_info.initialDataSize = read_prefix.data_size;
+   create_info.pInitialData = buffer.data() + sizeof(VKPipelineCachePrefixHeader);
+   VkPipelineCache vk_pipeline_cache = VK_NULL_HANDLE;
+-  vkCreatePipelineCache(device.vk_handle(), &create_info, nullptr, &vk_pipeline_cache);
++  if (vkCreatePipelineCache(device.vk_handle(), &create_info, nullptr, &vk_pipeline_cache) !=
++      VK_SUCCESS)
++  {
++    CLOG_WARN(&LOG, "Ignoring rejected pipeline cache [%s].", cache_file.c_str());
++    return;
++  }
+ 
+   vkMergePipelineCaches(device.vk_handle(), vk_pipeline_cache_static_, 1, &vk_pipeline_cache);
+   vkDestroyPipelineCache(device.vk_handle(), vk_pipeline_cache, nullptr);
+diff --git a/source/blender/gpu/vulkan/vk_shader_compiler.cc b/source/blender/gpu/vulkan/vk_shader_compiler.cc
+index b73984e2..eb0d667b 100644
+--- a/source/blender/gpu/vulkan/vk_shader_compiler.cc
++++ b/source/blender/gpu/vulkan/vk_shader_compiler.cc
+@@ -16,6 +16,7 @@
+ 
+ #include "vk_shader.hh"
+ #include "vk_shader_compiler.hh"
++#include "vk_shader_runtime.hh"
+ 
+ #include <iostream>
+ #include <string>
+@@ -26,6 +27,15 @@ namespace blender::gpu {
+ 
+ static CLG_LogRef LOG = {"gpu.vulkan"};
+ 
++static std::mutex spirv_cache_mutex;
++
++static VKShaderTarget shader_target_get()
++{
++  return vk_shader_target(
++      VKBackend::get().device.physical_device_properties_get().apiVersion,
++      GPU_type_matches(GPU_DEVICE_QUALCOMM, GPU_OS_ANY, GPU_DRIVER_ANY));
++}
++
+ static std::optional<std::string> cache_dir_get()
+ {
+   static std::optional<std::string> result = []() -> std::optional<std::string> {
+@@ -33,12 +43,9 @@ static std::optional<std::string> cache_dir_get()
+     /* Shader builder doesn't return the correct appdir. */
+     BKE_appdir_folder_caches(tmp_dir_buffer, sizeof(tmp_dir_buffer));
+ 
+-    /* Version the cache by the device Vulkan version: the target SPIR-V version
+-     * depends on it, and the source hash alone would otherwise reuse SPIR-V
+-     * compiled for a different target (e.g. 1.5 on a 1.1 device). */
+-    const uint32_t api = VKBackend::get().device.physical_device_properties_get().apiVersion;
+-    const char *ver = (api < VK_API_VERSION_1_2) ? "vk11" : "vk12";
+-    std::string cache_dir = std::string(tmp_dir_buffer) + "vk-spirv-cache-" + ver + SEP_STR;
++    /* Invalidate shaders written before the compiler target matched the device. */
++    std::string cache_dir = std::string(tmp_dir_buffer) + "vk-spirv-cache-" +
++                            shader_target_get().cache_directory + SEP_STR;
+     BLI_dir_create_recursive(cache_dir.c_str());
+     return cache_dir;
+   }();
+@@ -69,6 +76,8 @@ static bool read_spirv_from_disk(VKShaderModule &shader_module)
+   std::string sidecar_path = (*cache_dir_get()) + SEP_STR + shader_module.sources_hash +
+                              ".sidecar.bin";
+ 
++  std::scoped_lock lock(spirv_cache_mutex);
++
+   if (!BLI_exists(spirv_path.c_str()) || !BLI_exists(sidecar_path.c_str())) {
+     return false;
+   }
+@@ -84,17 +93,26 @@ static bool read_spirv_from_disk(VKShaderModule &shader_module)
+     return false;
+   }
+   sidecar_file.seekg(0, std::ios::beg);
+-  sidecar_file.read(reinterpret_cast<char *>(&sidecar), sizeof(sidecar));
++  if (!sidecar_file.read(reinterpret_cast<char *>(&sidecar), sizeof(sidecar))) {
++    return false;
++  }
+ 
+   /* Read spirv binary. */
+   fstream spirv_file(spirv_path, std::ios::binary | std::ios::in | std::ios::ate);
+   std::streamsize size = spirv_file.tellg();
+-  if (size != sidecar.spirv_size) {
++  if (!vk_spirv_cache_size_valid(size, sidecar.spirv_size)) {
+     return false;
+   }
+   spirv_file.seekg(0, std::ios::beg);
+   shader_module.spirv_binary.resize(size / 4);
+-  spirv_file.read(reinterpret_cast<char *>(shader_module.spirv_binary.data()), size);
++  if (!spirv_file.read(reinterpret_cast<char *>(shader_module.spirv_binary.data()), size) ||
++      !vk_spirv_cache_header_valid(shader_module.spirv_binary.data(),
++                                   shader_module.spirv_binary.size(),
++                                   shader_target_get().spirv_version))
++  {
++    shader_module.spirv_binary.clear();
++    return false;
++  }
+ 
+   CLOG_TRACE(&LOG, "reading SpirV from disk %s", spirv_path.c_str());
+   return true;
+@@ -109,6 +127,8 @@ static void write_spirv_to_disk(VKShaderModule &shader_module)
+     return;
+   }
+ 
++  std::scoped_lock lock(spirv_cache_mutex);
++
+   /* Write the spirv binary */
+   std::string spirv_path = (*cache_dir_get()) + SEP_STR + shader_module.sources_hash + ".spv";
+   CLOG_TRACE(&LOG, "write SpirV to disk %s", spirv_path.c_str());
+@@ -213,7 +233,13 @@ static bool compile_ex(shaderc::Compiler &compiler,
+ 
+   shaderc::CompileOptions options;
+   bool do_optimize = true;
+-  options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_2);
++  const VKShaderTarget target = shader_target_get();
++  static_assert(uint32_t(shaderc_env_version_vulkan_1_1) == VK_API_VERSION_1_1);
++  static_assert(uint32_t(shaderc_env_version_vulkan_1_2) == VK_API_VERSION_1_2);
++  static_assert(uint32_t(shaderc_spirv_version_1_3) == 0x00010300);
++  static_assert(uint32_t(shaderc_spirv_version_1_5) == 0x00010500);
++  options.SetTargetEnvironment(shaderc_target_env_vulkan, target.environment);
++  options.SetTargetSpirv(static_cast<shaderc_spirv_version>(target.spirv_version));
+   if (G.debug & G_DEBUG_GPU_RENDERDOC) {
+     do_optimize = false;
+   }
+@@ -221,13 +247,6 @@ static bool compile_ex(shaderc::Compiler &compiler,
+   if (GPU_type_matches(GPU_DEVICE_QUALCOMM, GPU_OS_ANY, GPU_DRIVER_ANY)) {
+     do_optimize = false;
+   }
+-  /* WORKAROUND: On Android (Wacom MovinkPad 14) Adreno's shader compiler fails with
+-   * `VK_ERROR_UNKNOWN` at pipeline creation on `OpCopyLogical`, which glslang emits
+-   * for struct copies when targeting SPIR-V >= 1.4. Target SPIR-V 1.3 so such copies
+-   * are expanded member-wise instead. */
+-  if (GPU_type_matches(GPU_DEVICE_QUALCOMM, GPU_OS_UNIX, GPU_DRIVER_ANY)) {
+-    options.SetTargetSpirv(shaderc_spirv_version_1_3);
+-  }
+   options.SetOptimizationLevel(do_optimize ? shaderc_optimization_level_performance :
+                                              shaderc_optimization_level_zero);
+ 
+diff --git a/source/blender/gpu/vulkan/vk_shader_runtime.hh b/source/blender/gpu/vulkan/vk_shader_runtime.hh
+new file mode 100644
+index 00000000..e071c682
+--- /dev/null
++++ b/source/blender/gpu/vulkan/vk_shader_runtime.hh
+@@ -0,0 +1,67 @@
++/* SPDX-FileCopyrightText: 2026 Blender Authors
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later */
++
++#pragma once
++
++#include <algorithm>
++#include <cstddef>
++#include <cstdint>
++#include <vulkan/vulkan_core.h>
++
++namespace blender::gpu {
++
++struct VKShaderTarget {
++  uint32_t environment;
++  uint32_t spirv_version;
++  const char *cache_directory;
++};
++
++/* Vulkan 1.1 only guarantees SPIR-V through 1.3. The compiler's desktop 1.2
++ * default can emit OpCopyLogical and other instructions older mobile drivers
++ * cannot consume. Version the cache by the actual compiler settings as well. */
++inline VKShaderTarget vk_shader_target(uint32_t api_version, bool qualcomm_workaround)
++{
++  if (api_version < VK_API_VERSION_1_2) {
++    return {VK_API_VERSION_1_1, 0x00010300, "vk11-spv13-v2"};
++  }
++  if (qualcomm_workaround) {
++    return {VK_API_VERSION_1_2, 0x00010300, "vk12-spv13-v2"};
++  }
++  return {VK_API_VERSION_1_2, 0x00010500, "vk12-spv15-v2"};
++}
++
++constexpr int64_t VK_SPIRV_CACHE_MAX_BYTES = 64 * 1024 * 1024;
++constexpr int64_t VK_PIPELINE_CACHE_MAX_BYTES = 256 * 1024 * 1024;
++
++inline bool vk_spirv_cache_size_valid(int64_t file_size, uint64_t recorded_size)
++{
++  return file_size >= 5 * int64_t(sizeof(uint32_t)) &&
++         file_size <= VK_SPIRV_CACHE_MAX_BYTES && file_size % sizeof(uint32_t) == 0 &&
++         uint64_t(file_size) == recorded_size;
++}
++
++inline bool vk_spirv_cache_header_valid(const uint32_t *words,
++                                      size_t word_count,
++                                      uint32_t maximum_version)
++{
++  return word_count >= 5 && words[0] == 0x07230203 && words[1] >= 0x00010000 &&
++         words[1] <= maximum_version && (words[1] & 0xff0000ff) == 0 && words[3] > 0 &&
++         words[4] == 0;
++}
++
++inline bool vk_pipeline_cache_size_valid(int64_t file_size,
++                                        size_t header_size,
++                                        uint64_t payload_size)
++{
++  return file_size > int64_t(header_size) && file_size <= VK_PIPELINE_CACHE_MAX_BYTES &&
++         payload_size == uint64_t(file_size) - header_size;
++}
++
++inline int vk_android_shader_compile_workers(int thread_count, uint64_t memory_bytes)
++{
++  const int limit = memory_bytes == 0 || memory_bytes < (6ull << 30) ? 2 : 4;
++  return std::clamp(thread_count, 1, limit);
++}
++
++}  // namespace blender::gpu

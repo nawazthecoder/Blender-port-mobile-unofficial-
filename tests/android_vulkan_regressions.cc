@@ -1,11 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "GHOST_VulkanAcquire.hh"
 #include "vk_image_barrier.hh"
+#include "vk_shader_runtime.hh"
 #include <array>
 #include <cassert>
 #include <iostream>
 #include <vector>
 using namespace blender::gpu::render_graph;
+using namespace blender::gpu;
 
 static VkImageMemoryBarrier barrier(int mip, int layer,
     VkImageLayout old_layout = VK_IMAGE_LAYOUT_GENERAL,
@@ -25,6 +27,56 @@ static void append(std::vector<VkImageMemoryBarrier> &batch, const VkImageMemory
 }
 int main()
 {
+  /* Compile settings and the cache namespace must agree on every driver path. */
+  for (bool qualcomm : {false, true}) {
+    auto target = vk_shader_target(VK_MAKE_API_VERSION(0, 1, 1, 231), qualcomm);
+    assert(target.environment == VK_API_VERSION_1_1 && target.spirv_version == 0x00010300);
+    assert(std::string(target.cache_directory) == "vk11-spv13-v2");
+    for (uint32_t api : {VK_API_VERSION_1_2, VK_API_VERSION_1_3, VK_API_VERSION_1_4}) {
+      target = vk_shader_target(api, qualcomm);
+      assert(target.environment == VK_API_VERSION_1_2);
+      assert(target.spirv_version == (qualcomm ? 0x00010300u : 0x00010500u));
+      assert(std::string(target.cache_directory) ==
+             (qualcomm ? "vk12-spv13-v2" : "vk12-spv15-v2"));
+    }
+  }
+  /* A crash can leave a partial file. Reject it before allocating or calling the driver. */
+  assert(!vk_spirv_cache_size_valid(-1, UINT64_MAX));
+  assert(!vk_spirv_cache_size_valid(0, 0));
+  assert(!vk_spirv_cache_size_valid(19, 19));
+  assert(!vk_spirv_cache_size_valid(21, 21));
+  assert(!vk_spirv_cache_size_valid(24, 28));
+  assert(!vk_spirv_cache_size_valid(VK_SPIRV_CACHE_MAX_BYTES + 4,
+                                    VK_SPIRV_CACHE_MAX_BYTES + 4));
+  assert(vk_spirv_cache_size_valid(24, 24));
+  std::array<uint32_t, 5> spirv = {0x07230203, 0x00010300, 0, 10, 0};
+  assert(!vk_spirv_cache_header_valid(nullptr, 0, 0x00010300));
+  assert(!vk_spirv_cache_header_valid(spirv.data(), 4, 0x00010300));
+  assert(vk_spirv_cache_header_valid(spirv.data(), spirv.size(), 0x00010300));
+  spirv[1] = 0x00010500;
+  assert(!vk_spirv_cache_header_valid(spirv.data(), spirv.size(), 0x00010300));
+  assert(vk_spirv_cache_header_valid(spirv.data(), spirv.size(), 0x00010500));
+  spirv[1] = 0x00010301;
+  assert(!vk_spirv_cache_header_valid(spirv.data(), spirv.size(), 0x00010500));
+  spirv[1] = 0x00010300; spirv[0] = 0;
+  assert(!vk_spirv_cache_header_valid(spirv.data(), spirv.size(), 0x00010300));
+  spirv[0] = 0x07230203; spirv[3] = 0;
+  assert(!vk_spirv_cache_header_valid(spirv.data(), spirv.size(), 0x00010300));
+  spirv[3] = 10; spirv[4] = 1;
+  assert(!vk_spirv_cache_header_valid(spirv.data(), spirv.size(), 0x00010300));
+  assert(!vk_pipeline_cache_size_valid(-1, 56, UINT64_MAX));
+  assert(!vk_pipeline_cache_size_valid(4, 56, 4));
+  assert(!vk_pipeline_cache_size_valid(56, 56, 0));
+  assert(!vk_pipeline_cache_size_valid(120, 56, 63));
+  assert(!vk_pipeline_cache_size_valid(120, 56, 65));
+  assert(!vk_pipeline_cache_size_valid(VK_PIPELINE_CACHE_MAX_BYTES + 1, 56,
+                                       VK_PIPELINE_CACHE_MAX_BYTES + 1 - 56));
+  assert(vk_pipeline_cache_size_valid(120, 56, 64));
+  assert(vk_android_shader_compile_workers(8, 4ull << 30) == 2);
+  assert(vk_android_shader_compile_workers(8, 0) == 2);
+  assert(vk_android_shader_compile_workers(8, 8ull << 30) == 4);
+  assert(vk_android_shader_compile_workers(1, 4ull << 30) == 1);
+  assert(vk_android_shader_compile_workers(0, 4ull << 30) == 1);
   std::vector<VkImageMemoryBarrier> batch;
   for (int mip = 0; mip < 2; mip++) {
     for (int layer = 0; layer < 2; layer++) { append(batch, barrier(mip, layer)); }
@@ -124,5 +176,5 @@ int main()
     assert(!result.image_index && calls == 4 && recreates == 3);
   }
   std::cout << "Vulkan regressions: independent mip/layer/aspect transitions, write hazards, "
-               "acquire ownership and bounded recovery passed\n";
+               "acquire ownership, bounded recovery, shader targets and corrupt caches passed\n";
 }

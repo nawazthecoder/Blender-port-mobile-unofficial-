@@ -1,4 +1,46 @@
-# Android graphics stability — revision 11
+# Android graphics stability
+
+## Revision 12 — Shading workspace crash hardening
+
+The user reports a crash when opening Shading. A device crash log has not yet
+been supplied, so neither a specific driver fault nor an Android low-memory
+termination has been confirmed.
+
+The investigation found a concrete compatibility bug. The shader compiler
+always selected Vulkan 1.2, including on Vulkan 1.1 devices supported by the
+Android backend. It now selects Vulkan 1.1 / SPIR-V 1.3 for those devices.
+Newer devices retain Vulkan 1.2 / SPIR-V 1.5, with the existing Qualcomm
+SPIR-V 1.3 workaround preserved. See the official
+[Vulkan/SPIR-V version mapping](https://docs.vulkan.org/guide/latest/versions.html).
+
+- Shader cache directories now encode the compiler settings and a new format
+  revision, so previously emitted incompatible modules are rebuilt automatically.
+- Cached SPIR-V sizes, word alignment, header and version are checked before
+  reuse. Failed reads and partial cache files are treated as misses. File access
+  is serialized across compiler workers. Pipeline cache headers and exact payload
+  lengths are checked before passing data to the driver, and rejected driver
+  caches are ignored.
+- Android compiler concurrency is capped at two workers below 6 GiB of RAM or
+  when RAM detection fails, and four on larger devices. This bounds temporary
+  compiler allocations when Material Preview starts. The viewport resolution,
+  materials and scene data are preserved. No measured memory reduction is claimed.
+- The prior session's startup log is preserved as `blender-previous.log` before
+  a new session starts. Android's newest available process-exit record is saved
+  as `blender-last-exit.txt`, with an optional `blender-last-exit.trace` alongside
+  it. These use the existing log destination, normally Downloads after granting
+  file access. Android may not retain a native trace. Reports stay on the phone.
+
+The APK uses versionCode **5020312**, versionName **5.2.3-android.12**, and the
+existing **org.blender.androidport** package and signing identity. Native build
+validation and the user's Shading test are pending at this checkpoint.
+
+After installing, save any unsaved project and test opening Shading on a new
+default cube, then on the scene that originally crashed. If it still exits,
+reopen Blender once and attach `blender-last-exit.txt` and `blender-previous.log`.
+The optional trace can help locate native driver faults. Do not clear app data
+to refresh shaders; the cache namespace handles this update.
+
+## Revision 11 — Synchronization and scheduling
 
 This update targets real synchronization and presentation faults found while
 investigating the user's report of occasional short graphics glitches. The exact

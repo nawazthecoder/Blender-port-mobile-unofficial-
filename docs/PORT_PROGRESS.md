@@ -266,3 +266,23 @@ Polyvra and Forge Mobile Studio have not been modified.
   hashes and saved. Signing fingerprint matches revisions 9/10.
 - Exact phone glitch cause, visual behavior and performance/power measurements
   remain unverified. A recording and triggering action are useful if it persists.
+
+## Revision 12 — Shading crash investigation
+
+Work continues from validated revision 11 at `15a598cb0fee6e5bd94c117d383fc67889ae4763`.
+The user reports that opening Shading crashes Blender on the phone. There is no
+device trace yet, so the incident's exact cause remains unconfirmed.
+
+Patch `0012-android-shading-crash-recovery.patch` corrects the Vulkan 1.1 shader
+target, invalidates old incompatible SPIR-V caches, validates cache sizes/headers,
+bounds Android shader compilation concurrency and preserves phone-only exit
+diagnostics. APK revision 12 is an update to `org.blender.androidport`.
+
+The CPU regression fixture covers actual compiler-target/cache helpers,
+unsupported cached SPIR-V versions, truncated and oversized caches, and the
+Android worker budget, alongside the existing barrier/acquisition fixtures.
+All 16 package/preparation tests, native dependency collection, virtual-mouse
+fixtures and Vulkan helper fixtures pass locally. ASan/UBSan remain enabled;
+local LeakSanitizer detection is disabled because this executor uses ptrace.
+Native compilation, APK audits and signing validation are pending. Do not
+describe the phone crash as fixed until the user has retested Shading.

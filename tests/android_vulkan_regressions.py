@@ -19,5 +19,6 @@ with tempfile.TemporaryDirectory(prefix='android-vulkan-regressions-') as direct
                     '-I', str(args.vulkan_include.resolve()),
                     '-I', str(source / 'intern/ghost'),
                     '-I', str(source / 'source/blender/gpu/vulkan/render_graph'),
+                    '-I', str(source / 'source/blender/gpu/vulkan'),
                     str(Path(__file__).with_suffix('.cc')), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

@@ -26,6 +26,11 @@ invalid frame acquisition, and adds Android idle/background scheduling improveme
 See [graphics changes and validation](docs/GRAPHICS_STABILITY.md). Native build and
 package checks pass for revision 11; phone validation remains pending.
 
+**Shading crash investigation:** revision 12 corrects the shader target on Vulkan
+1.1 devices, rebuilds incompatible cached shaders, validates partial caches and
+limits Android compiler memory bursts. It also preserves the previous session log
+and Android exit diagnostics. Native build and phone retesting are pending.
+
 ## Build the full editor
 
 Use **Actions → Build Blender 5.2.3 Full Android Editor**. Changes to its locked
