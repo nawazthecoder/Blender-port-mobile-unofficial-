@@ -284,5 +284,30 @@ Android worker budget, alongside the existing barrier/acquisition fixtures.
 All 16 package/preparation tests, native dependency collection, virtual-mouse
 fixtures and Vulkan helper fixtures pass locally. ASan/UBSan remain enabled;
 local LeakSanitizer detection is disabled because this executor uses ptrace.
-Native compilation, APK audits and signing validation are pending. Do not
-describe the phone crash as fixed until the user has retested Shading.
+Native compilation, APK audits and signing validation also passed in the workflow
+recorded below. Do not describe the phone crash as fixed until the user has
+retested Shading.
+
+
+### Revision 12 validated artifact
+
+- Implementation `b0a76abf1b672a1b337b6fad367dec749f6125ab` passed
+  [workflow 43175475404](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43175475404),
+  job `131038579582`. Full native compilation/linking, Java packaging, regression
+  fixtures, runtime/ARM64 ELF audits, APK identity, v3 signature and the retained
+  update certificate all passed. The signing-key and compiler caches restored.
+- Artifact provenance merge `d8f0129210921b5c334e2a367c7ad0944f925bee` was checked
+  to include the implementation. The source lock matches revision 12's patches.
+- Artifact `13924422570`, `blender-5.2.3-android-full-arm64`, expires 2026-11-26.
+  ZIP size 281,021,036 bytes; SHA256
+  `508fd2c9a90d3b595cb42c6f24b81eb1e774d883e395923049625a4351e4b962`.
+- APK `blender-5.2.3-android.12-shading-arm64.apk`, 283,080,319 bytes, 149 native
+  libraries, package `org.blender.androidport`, versionCode 5020312, versionName
+  `5.2.3-android.12`, minimum API 31 and target API 34. APK SHA256
+  `a1aa7cb3ebc6bfb4e6d918e4c39dd3c1813c5824513ded688eefa8d00455094a`.
+  The ZIP/APK digests, identity, source lock and signing fingerprint were verified
+  on download. The certificate remains
+  `45971c45d2531454994f4382a402bdb3a491159cbee356a8a0effd831c76ab3e`.
+- The exact Shading crash has not been reproduced on the user's phone. Retest
+  Shading with a default cube and the original scene. If it persists, reopen once
+  and attach the preserved previous log and Android exit report from Downloads.

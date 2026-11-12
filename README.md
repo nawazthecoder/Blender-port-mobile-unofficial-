@@ -18,7 +18,7 @@ pointer redraw and hover-queue overhead. See [controls and installation](docs/VI
 revision 7. Native build and package checks pass; the new behavior and latency still need
 phone validation.
 
-Validated build: [revision 11 graphics stability workflow](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/42001650804).
+Validated build: [revision 12 Shading crash hardening workflow](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43175475404).
 The full ARM64 APK is available in its `blender-5.2.3-android-full-arm64` artifact.
 
 **Graphics stability:** revision 11 fixes image subresource synchronization and
@@ -29,7 +29,8 @@ package checks pass for revision 11; phone validation remains pending.
 **Shading crash investigation:** revision 12 corrects the shader target on Vulkan
 1.1 devices, rebuilds incompatible cached shaders, validates partial caches and
 limits Android compiler memory bursts. It also preserves the previous session log
-and Android exit diagnostics. Native build and phone retesting are pending.
+and Android exit diagnostics. Native build, APK audits and matching-signature
+checks pass. The user's Shading retest remains pending.
 
 ## Build the full editor
 

@@ -31,8 +31,13 @@ SPIR-V 1.3 workaround preserved. See the official
   file access. Android may not retain a native trace. Reports stay on the phone.
 
 The APK uses versionCode **5020312**, versionName **5.2.3-android.12**, and the
-existing **org.blender.androidport** package and signing identity. Native build
-validation and the user's Shading test are pending at this checkpoint.
+existing **org.blender.androidport** package and signing identity. Full native
+compilation, regression fixtures, runtime/ELF audits, APK identity, v3 signing
+and matching-update-certificate checks passed in
+[workflow 43175475404](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43175475404).
+The downloaded ZIP and APK hashes were checked against CI, and the APK source
+merge was verified to contain implementation `b0a76abf1b672a1b337b6fad367dec749f6125ab`.
+The user's Shading test remains pending.
 
 After installing, save any unsaved project and test opening Shading on a new
 default cube, then on the scene that originally crashed. If it still exits,
