@@ -348,3 +348,8 @@ the old target payload did not provide. The builder now installs pinned Zstd
 A local compiler probe also caught an ambiguous Vulkan loader-version query
 after the Volk namespace migration. The query now explicitly uses the loader
 namespace; the corrected probe compiles with the pinned Vulkan headers.
+
+Fifth 5.3 run 43202215832 built and installed all supplemental Android
+dependencies, including KTX. Host code generation then stopped at a dependent
+C++ template call in the official KD-tree source with Clang 18. An explicit
+standard template disambiguator fixes the call for both host and NDK compilers.

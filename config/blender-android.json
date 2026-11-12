@@ -20,7 +20,7 @@
   "additional_patches": [
     {
       "path": "patches/0014-blender-5.3-build-fixes.patch",
-      "sha256": "5bece8c47b556c5033a67f1bb6790f292fba2227d07818c288d450948547a861"
+      "sha256": "fb1a3402867faf07e26a21805c326aaca8a940c8cd4311f6ebee0c63818cddf8"
     }
   ],
   "host_libraries_commit": "e92f1a54a92c774fbeb0cf51c4652bc510d9a50a",
