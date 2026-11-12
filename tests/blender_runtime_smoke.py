@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import tempfile
 
-assert bpy.app.version[:3] == (5, 2, 3), bpy.app.version_string
+assert bpy.app.version[:3] == (5, 3, 0), bpy.app.version_string
 assert bpy.app.build_options.cycles
 assert bpy.app.build_options.fluid
 assert bpy.app.build_options.alembic

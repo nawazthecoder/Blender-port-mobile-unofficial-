@@ -29,15 +29,18 @@ int main()
 {
   /* Compile settings and the cache namespace must agree on every driver path. */
   for (bool qualcomm : {false, true}) {
-    auto target = vk_shader_target(VK_MAKE_API_VERSION(0, 1, 1, 231), qualcomm);
-    assert(target.environment == VK_API_VERSION_1_1 && target.spirv_version == 0x00010300);
-    assert(std::string(target.cache_directory) == "vk11-spv13-v2");
-    for (uint32_t api : {VK_API_VERSION_1_2, VK_API_VERSION_1_3, VK_API_VERSION_1_4}) {
-      target = vk_shader_target(api, qualcomm);
-      assert(target.environment == VK_API_VERSION_1_2);
-      assert(target.spirv_version == (qualcomm ? 0x00010300u : 0x00010500u));
-      assert(std::string(target.cache_directory) ==
-             (qualcomm ? "vk12-spv13-v2" : "vk12-spv15-v2"));
+    for (bool spirv14 : {false, true}) {
+      for (uint32_t api : {VK_API_VERSION_1_1, VK_API_VERSION_1_2,
+                           VK_API_VERSION_1_3, VK_API_VERSION_1_4})
+      {
+        auto target = vk_shader_target(api, qualcomm, spirv14);
+        bool vk11 = api == VK_API_VERSION_1_1;
+        assert(target.environment == (vk11 ? VK_API_VERSION_1_1 : VK_API_VERSION_1_2));
+        assert(target.spirv_version == (spirv14 && !qualcomm ? 0x00010400u : 0x00010300u));
+        std::string cache = std::string(vk11 ? "vk11-" : "vk12-") +
+                            (spirv14 && !qualcomm ? "spv14-v3" : "spv13-v3");
+        assert(std::string(target.cache_directory) == cache);
+      }
     }
   }
   /* A crash can leave a partial file. Reject it before allocating or calling the driver. */

@@ -311,3 +311,14 @@ retested Shading.
 - The exact Shading crash has not been reproduced on the user's phone. Retest
   Shading with a default cube and the original scene. If it persists, reopen once
   and attach the preserved previous log and Android exit report from Downloads.
+
+
+## Revision 13 — official 5.3.0 upgrade
+
+Migrating to stable tag v5.3.0, official commit
+`02f0899d78e374b63e7181d9061e1f7ab03419cc`, with release/file metadata preserved.
+Patch and checksum are locked in config/blender-android.json. The existing input,
+Vulkan stability and crash diagnostics changes are adapted to 5.3's Volk/resource
+APIs. Jolt, OpenTimelineIO and KTX dependencies are built from the official source
+locks. See docs/UPGRADE_5_3.md. Local regression checks and clean source preparation
+pass; the full native build and a new phone APK test are pending.

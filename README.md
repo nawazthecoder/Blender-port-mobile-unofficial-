@@ -1,75 +1,67 @@
-# Unofficial Blender Port for Android
+# Unofficial Blender 5.3.0 for Android
 
-Native Android ARM64 porting work targeting **Blender 5.2.3 LTS**, based on the
-actual stable release source. Not affiliated with the Blender Foundation.
+Android ARM64 port of the official **Blender 5.3.0 stable** source, using the
+unofficial simfeo Android backend and the phone controls/fixes developed here.
+Not affiliated with the Blender Foundation.
 
-**Status: full native build, APK packaging, runtime asset checks, ARM64 native
-dependency audit and Android signature verification pass. The user confirms
-revision 7 launches on their phone; individual features still need testing.**
+**Status: revision 13 source migration and local regression checks pass. Full
+Android compilation, APK validation and phone testing are pending.** The last
+validated APK is Blender 5.2.3 Android revision 12, from
+[workflow 43175475404](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43175475404).
 
-The native build now applies the repository's Android patch to the exact official
-5.2.3 release commit. The source lock, patch and build scripts are committed here;
-the build does not rename a 5.3 alpha binary or substitute a diagnostic renderer.
+The new source lock uses official tag `v5.3.0`, commit
+`02f0899d78e374b63e7181d9061e1f7ab03419cc`. Blender's release/file-format metadata
+is preserved. The Android patch is rebased onto that source; the version is not
+changed by relabelling an older editor. See the
+[official release](https://www.blender.org/releases/5-3/) and
+[upgrade notes](docs/UPGRADE_5_3.md).
 
-**Virtual mouse:** revision 10 keeps the pointer above menus, adds double-tap
-right click, two-finger middle drag and three-finger scrolling, and reduces
-pointer redraw and hover-queue overhead. See [controls and installation](docs/VIRTUAL_MOUSE.md).
-**Blender Android** revision 10 updates revision 9 and can remain alongside
-revision 7. Native build and package checks pass; the new behavior and latency still need
-phone validation.
+The full build includes EEVEE, Cycles CPU, Python, sculpting, animation,
+Geometry Nodes, USD, Alembic, OpenVDB, FFmpeg and simulation. The upgrade adds
+Android builds of Jolt physics, OpenTimelineIO and KTX texture dependencies from
+the exact versions/checksums in Blender's source. GPU-specific desktop features
+such as CUDA, OptiX and DLSS are disabled on Android. Jolt uses its CPU backend.
 
-Validated build: [revision 12 Shading crash hardening workflow](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43175475404).
-The full ARM64 APK is available in its `blender-5.2.3-android-full-arm64` artifact.
+The virtual mouse stays above menus. It supports single-tap left click,
+double-tap right click, two-finger middle drag and three-finger scrolling.
+See [controls](docs/VIRTUAL_MOUSE.md). Shader cache validation, bounded shader
+compilation, Vulkan frame recovery and previous-session crash diagnostics are
+retained and adapted to 5.3's Vulkan resource tracking and Volk dispatch.
 
-**Graphics stability:** revision 11 fixes image subresource synchronization and
-invalid frame acquisition, and adds Android idle/background scheduling improvements.
-See [graphics changes and validation](docs/GRAPHICS_STABILITY.md). Native build and
-package checks pass for revision 11; phone validation remains pending.
+## Build
 
-**Shading crash investigation:** revision 12 corrects the shader target on Vulkan
-1.1 devices, rebuilds incompatible cached shaders, validates partial caches and
-limits Android compiler memory bursts. It also preserves the previous session log
-and Android exit diagnostics. Native build, APK audits and matching-signature
-checks pass. The user's Shading retest remains pending.
+Use **Actions → Build Blender 5.3.0 Full Android Editor**. The workflow checks out
+the locked stable commit, validates/applies the patch, fetches pinned host and
+Android libraries, builds the new Android dependencies, then compiles the full
+native editor. Download `blender-5.3.0-android-full-arm64` only from a successful
+run. Build logs and dependency/compiler progress are preserved after failures.
 
-## Build the full editor
+To prepare source locally:
 
-Use **Actions → Build Blender 5.2.3 Full Android Editor**. Changes to its locked
-source, patch or build scripts start it automatically. It builds the `full`
-configuration, including Cycles CPU rendering, EEVEE, Python, animation, sculpting,
-USD, Alembic, OpenVDB, FFmpeg and simulation features enabled by the Android port.
-These are build targets, not a claim that every feature has passed device tests.
+```bash
+git clone --depth 1 --branch v5.3.0 https://github.com/blender/blender.git blender-source
+python3 scripts/prepare_stable_android.py blender-source
+cd blender-source
+bash ../scripts/fetch_native_dependencies.sh
+python3 build_files/android/build.py full
+```
 
-A successful run must compile `libblender.so`, package the real Blender runtime,
-pass the ARM64 ELF and dependency audit, and pass Android signature verification
-before uploading `blender-5.2.3-android-full-arm64`.
+The SDK/NDK and host compiler must be installed as configured in the workflow.
+The full build requires NDK 30.0.16248370, API 31+, Vulkan headers 1.4.341 and a
+Linux x86-64 build host. The generated APK targets Android ARM64.
 
-- [Graphics/texture-paint troubleshooting](docs/ANDROID_TROUBLESHOOTING.md)
-- [Latest checkpoint and resume instructions](docs/PORT_PROGRESS.md)
-- [Source/version lock](config/blender-android.json)
-- [Android backport patch](patches/blender-5.2.3-android.patch)
-- [Build instructions, attribution and limits](docs/NATIVE_BLENDER_ANDROID.md)
-- [Full source build workflow](.github/workflows/real-blender-native.yml)
-- [Device Python smoke test](tests/blender_runtime_smoke.py)
+## Installation and verification
 
-The patch adapts the existing `simfeo/blender` Android GHOST, lifecycle, input,
-AAudio and packaging work to the stable source. It preserves Blender's 5.2.3
-version/file-format metadata and uses the matching `5.2` runtime directory.
-Default rendering uses the display's native resolution. An explicit render-scale
-setting remains available for memory-constrained devices.
+The package stays **Blender Android** (`org.blender.androidport`). Revision 13
+uses versionCode **5030013** and versionName **5.3.0-android.13**. CI checks the
+same signing certificate as revisions 9–12, so an unrelated key cannot silently
+produce an incompatible update. Save projects before installing an update.
 
-## Existing experiments
+A successful package audit checks native ARM64 ELF dependencies, runtime/LFS
+assets, package identity and the update signature. It does not prove phone
+rendering, Shading stability or every editor feature. Those checks remain
+necessary on the device. See [progress](docs/PORT_PROGRESS.md) and
+[graphics diagnostics](docs/GRAPHICS_STABILITY.md).
 
-`android-app/` is the older **GPU diagnostic host**, not Blender. Its APK and green
-workflow status do not prove the full editor works. The old upstream-test-APK
-workflow downloads a separately authored, unmodified 5.3 alpha port; it is not
-the stable build produced by this repository. Older dependency experiments are
-retained for reference.
-
-## License and credits
-
-Blender is GPL software; constituent files retain their original SPDX licenses.
-The Android backport derives from [simfeo/blender](https://github.com/simfeo/blender)
-and its credited contributors. This repository's preparation and validation tools
-are GPL-2.0-or-later. Corresponding source is the pinned official Blender source
-plus the committed patch. Keep Blender and third-party notices with distributions.
+Blender and these Android modifications are GPL-2.0-or-later. CI includes the
+corresponding source patch, source lock and license files with validated APKs.

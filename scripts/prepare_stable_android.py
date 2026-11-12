@@ -49,6 +49,11 @@ def prepare(source, manifest_path=ROOT / 'config/blender-android.json'):
                 capture=True).stdout.split()
     if entry[:2] != ['160000', expected]:
         raise ValueError('Android dependency gitlink is not pinned to the expected commit')
+    if manifest.get('host_libraries_commit'):
+        host = run('git', 'ls-files', '--stage', 'lib/linux_x64', cwd=source,
+                   capture=True).stdout.split()
+        if host[:2] != ['160000', manifest['host_libraries_commit']]:
+            raise ValueError('Host dependency gitlink does not match this stable release')
     print(f'Prepared actual Blender {found} stable + Android port revision {manifest["port_revision"]}')
     print('Compilation and device validation are separate required steps.')
     return manifest
