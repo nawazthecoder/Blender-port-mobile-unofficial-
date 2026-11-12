@@ -1,5 +1,5 @@
 diff --git a/build_files/android/build_release_dependencies.py b/build_files/android/build_release_dependencies.py
-index db1b85b4..d7464655 100644
+index db1b85b4..c74f63c9 100644
 --- a/build_files/android/build_release_dependencies.py
 +++ b/build_files/android/build_release_dependencies.py
 @@ -129,19 +129,34 @@ def main():
@@ -49,6 +49,27 @@ index db1b85b4..d7464655 100644
                     f'-DRapidJSON_ROOT={rapidjson}', f'-Dminizip-ng_ROOT={minizip}',
                     f'-DZLIB_ROOT={LIBDIR}/zlib'),
            required=('lib/libopentimelineio.so*', 'python/opentimelineio/__init__.py'))
+@@ -159,12 +174,19 @@ def main():
+     # generic .so suffix; the ELF payload is still built for Android by the NDK.
+     for module in (otio / 'python/opentimelineio').glob('*.cpython-*.so'):
+         module.replace(module.with_name(module.name.split('.cpython-')[0] + '.so'))
++    zstd = build('ZSTD', 'zstd53', source_subdir='build/cmake',
++                 options=('-DZSTD_BUILD_PROGRAMS=OFF', '-DZSTD_BUILD_SHARED=OFF',
++                          '-DZSTD_BUILD_STATIC=ON', '-DZSTD_BUILD_TESTS=OFF',
++                          '-DZSTD_LEGACY_SUPPORT=OFF', '-DZSTD_LZ4_SUPPORT=OFF',
++                          '-DZSTD_LZMA_SUPPORT=OFF', '-DZSTD_MULTITHREAD_SUPPORT=ON',
++                          '-DZSTD_ZLIB_SUPPORT=OFF'),
++                 required=('lib/libzstd.a', 'lib/cmake/zstd/*.cmake'))
+     build('KTX', 'ktx', patches=('ktx_zstd_dep_fix.diff', 'ktx_asan.diff'),
+           options=('-DBUILD_SHARED_LIBS=ON', '-DKTX_FEATURE_TOOLS=OFF',
+                    '-DKTX_FEATURE_TESTS=OFF', '-DKTX_FEATURE_ETC_UNPACK=OFF',
+                    '-DKTX_FEATURE_JNI=OFF', '-DASTCENC_ISA_NEON=ON',
+                    '-DASTCENC_ISA_AVX2=OFF', '-DASTCENC_ISA_SSE41=OFF',
+-                   '-DASTCENC_ISA_SSE2=OFF', f'-Dzstd_ROOT={LIBDIR}/zstd'),
++                   '-DASTCENC_ISA_SSE2=OFF', f'-Dzstd_ROOT={zstd}'),
+           required=('lib/libktx.so*', 'lib/cmake/ktx/*.cmake'))
+ 
+ 
 diff --git a/build_files/build_environment/patches/opentimelineio_android_python.diff b/build_files/build_environment/patches/opentimelineio_android_python.diff
 new file mode 100644
 index 00000000..4965a5f0

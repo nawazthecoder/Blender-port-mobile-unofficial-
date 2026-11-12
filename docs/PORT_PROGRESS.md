@@ -339,3 +339,8 @@ The Android module link correctly rejected unresolved CPython symbols because
 the desktop Python::Module target omitted libpython. The Android-only CMake
 patch now links the pinned target Python shared library explicitly for those
 bindings. Completed native compilation remains cached.
+
+Fourth 5.3 run 43200505045 linked and installed OpenTimelineIO and its Android
+Python extensions. KTX configuration then needed a Zstandard CMake package that
+the old target payload did not provide. The builder now installs pinned Zstd
+1.5.7 with a static target/config package and adapts its target alias for KTX.

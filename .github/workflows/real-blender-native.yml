@@ -134,6 +134,7 @@ jobs:
             blender-source/lib/android_arm64/rapidjson53
             blender-source/lib/android_arm64/minizipng53
             blender-source/lib/android_arm64/pybind1153
+            blender-source/lib/android_arm64/zstd53
           key: android-release53-r30-api31-v1-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: android-release53-r30-api31-v1-
       - name: Compile full Blender and package Android APK
@@ -214,6 +215,7 @@ jobs:
             blender-source/lib/android_arm64/rapidjson53
             blender-source/lib/android_arm64/minizipng53
             blender-source/lib/android_arm64/pybind1153
+            blender-source/lib/android_arm64/zstd53
           key: android-release53-r30-api31-v1-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Save compiler progress even after a compile failure
         if: always() && steps.compile.outcome != 'skipped'
