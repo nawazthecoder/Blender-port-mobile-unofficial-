@@ -16,7 +16,7 @@
   "android_min_api": 31,
   "configuration": "full",
   "port_revision": 13,
-  "status": "revision13-official-5.3.0-migration-native-build-pending",
+  "status": "revision13-native-ci-validated-device-runtime-unverified",
   "additional_patches": [
     {
       "path": "patches/0014-blender-5.3-build-fixes.patch",

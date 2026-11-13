@@ -361,3 +361,31 @@ qualification, popup scrolling needed the new typed list first() accessor, and
 the virtual keyboard needed BLI_math_vector_c.hh for legacy integer vector
 helpers. Patch 0015 addresses all three; local loader/header compiler probes pass.
 The completed native compilation and dependency installs were cached by CI.
+
+## Revision 13 — native build and APK validation passed
+
+- Implementation `61785f324f0fc42bad48e14145f7dd6a83fe068e` built successfully in
+  workflow [43455837164](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43455837164),
+  job 131989601352. All 7,306 native tasks completed, libblender.so linked,
+  and the meshopt/Draco/KTX bridges and APK packaged successfully.
+- All preparation, virtual-mouse, Vulkan regression, native dependency collection,
+  runtime/LFS payload, ARM64 ELF, package identity, APK v3 signing and matching
+  update-certificate checks passed. Local compiler probes and clean application
+  of all three source patches also passed.
+- Artifact provenance merge `664016e5cf1206d305eb877089ad39a2c4e79606` includes
+  the implementation. Its source lock/checksums and complete corresponding
+  source patch were checked against the prepared official 5.3.0 source.
+- Artifact `14055050380`, `blender-5.3.0-android-full-arm64`, expires 2026-11-27.
+  ZIP size 289,635,389 bytes; SHA256
+  `a09c2cf7402c8be7ba78b5c22dee00dea256d3568569b7d14bf00e568630a26c`.
+- APK `blender-5.3.0-android.13-arm64.apk`, 291,776,720 bytes, 155 native libraries,
+  package `org.blender.androidport`, versionCode 5030013, versionName
+  `5.3.0-android.13`, minimum API 31 and target API 34. APK SHA256
+  `287cb60b89afcb4e13342c9ae8d1d217152185466a5bdea3705c76723b2f4708`.
+- The download's ZIP/APK hashes, APK identity, signing certificate, source
+  provenance and runtime payload were verified. OpenTimelineIO's native Python
+  modules, the KTX glTF bridge and Cycles are present. The update certificate is
+  `45971c45d2531454994f4382a402bdb3a491159cbee356a8a0effd831c76ab3e`.
+- This establishes a compiled and audited APK. Device startup, Shading/Texture
+  Paint, mouse/menu gestures, project save/load and a small Cycles CPU render
+  still require phone verification. The prior 5.2.3 revision 12 is preserved.

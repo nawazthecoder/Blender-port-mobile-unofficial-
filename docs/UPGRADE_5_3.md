@@ -28,7 +28,8 @@ contains 5.2.3; the source lock and native workflow determine the actual release
 - New Android dependencies are built using the versions, source checksums and
   relevant patches from the official release: Jolt 5.6.0, KTX 4.4.2,
   OpenTimelineIO 31e3101e750be2aa992274ac02c0679077872e57, RapidJSON
-  24b5e7a8b27f42fa16b96fc70aade9106cf7102f and minizip-ng 4.2.2.
+  24b5e7a8b27f42fa16b96fc70aade9106cf7102f, minizip-ng 4.2.2,
+  pybind11 3.0.1 and Zstandard 1.5.7.
   Successful installation markers validate settings/artifacts; downloads and
   partial builds are cached independently. Jolt's CPU backend is enabled.
 - KTX's glTF native bridge and OpenTimelineIO Python bindings are included in the
@@ -44,10 +45,22 @@ The patch applies cleanly to a fresh exact stable checkout without altering its
 version header. The 16 package/preparation tests, virtual-mouse sanitizer fixture,
 Vulkan policy/barrier/acquisition sanitizer fixture and native collection fixture
 pass locally. Local LeakSanitizer is disabled because the executor uses ptrace;
-address/undefined sanitizers stay enabled. Native compilation and device behavior
-are pending. Do not treat source preparation alone as a working 5.3 APK.
+address/undefined sanitizers stay enabled. Full native ARM64 compilation, codec
+bridges, runtime/ELF audit, package identity and update-signing checks passed in
+[workflow 43455837164](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43455837164).
+The APK contains 155 native libraries and keeps the established signing identity.
+The downloaded ZIP/APK digests, source locks and corresponding source patch were
+verified against the published implementation at
+`61785f324f0fc42bad48e14145f7dd6a83fe068e`.
 
-After a validated APK is available, save a copy of existing projects before
+The native build also validated the required 5.3 API adaptations: explicit Volk
+loader callbacks for Android VMA, typed popup list access, the virtual keyboard's
+integer vector helper include, and a standard dependent-template disambiguator
+for the host compiler. See patches 0014 and 0015.
+
+Phone rendering and Shading behavior still require device verification.
+
+Save a copy of existing projects before
 upgrading. Test launch/version, opening/saving a .blend, Shading, Texture Paint,
 virtual-mouse menus, lifecycle changes and a small Cycles CPU render. These phone
 checks have not yet run.
