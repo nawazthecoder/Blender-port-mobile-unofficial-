@@ -21,6 +21,10 @@
     {
       "path": "patches/0014-blender-5.3-build-fixes.patch",
       "sha256": "fb1a3402867faf07e26a21805c326aaca8a940c8cd4311f6ebee0c63818cddf8"
+    },
+    {
+      "path": "patches/0015-blender-5.3-ui-and-loader-fixes.patch",
+      "sha256": "faeae479cb405375c7baf7205eb46eeee549ebef0a55107d049b16e768153fac"
     }
   ],
   "host_libraries_commit": "e92f1a54a92c774fbeb0cf51c4652bc510d9a50a",

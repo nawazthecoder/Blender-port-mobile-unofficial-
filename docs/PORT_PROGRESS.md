@@ -353,3 +353,11 @@ Fifth 5.3 run 43202215832 built and installed all supplemental Android
 dependencies, including KTX. Host code generation then stopped at a dependent
 C++ template call in the official KD-tree source with Clang 18. An explicit
 standard template disambiguator fixes the call for both host and NDK compilers.
+
+Seventh 5.3 run 43203283908 completed 7,302 of 7,306 native build tasks,
+including the Vulkan backend and the new dependencies. Three source files
+blocked the final link: Android VMA loader callbacks needed explicit Volk
+qualification, popup scrolling needed the new typed list first() accessor, and
+the virtual keyboard needed BLI_math_vector_c.hh for legacy integer vector
+helpers. Patch 0015 addresses all three; local loader/header compiler probes pass.
+The completed native compilation and dependency installs were cached by CI.
