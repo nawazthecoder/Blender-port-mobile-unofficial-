@@ -1,4 +1,4 @@
-# Official Blender 5.3.0 Android migration — revision 13
+# Official Blender 5.3.0 Android migration
 
 The user requested the newest official stable Blender. The official release
 page lists 5.3.0, released 2026-11-10. Source is pinned to tag v5.3.0 and commit
@@ -9,6 +9,12 @@ at repository commit `9c93feb403b4ca0f96ab5dc63e391c4b3978c57c`.
 The existing Android integration branch/PR is retained so the established
 signing-key and build caches remain available. Its historical branch name still
 contains 5.2.3; the source lock and native workflow determine the actual release.
+
+The initial migration was revision 13. Revision 14 addresses the reported phone
+lag/crash by fixing a framebuffer-retirement gap; its full native build and APK
+checks passed in [workflow 43570439821](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43570439821).
+It retains the same 5.3.0 source pin and uses APK 5030014 / 5.3.0-android.14.
+The exact phone outcome is still unverified. See [graphics stability](GRAPHICS_STABILITY.md).
 
 ## Changes
 

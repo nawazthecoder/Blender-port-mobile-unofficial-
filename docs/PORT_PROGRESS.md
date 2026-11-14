@@ -411,3 +411,27 @@ The source remains official 5.3.0 with APK version 5030014 / 5.3.0-android.14.
 Reference checked during investigation: the independent Android port's
 [5.3 final resource-retirement study](https://github.com/Wanderson-Magalhaes/blender_for_android/blob/v5.3.0-android/ANDROID_UPSTREAM_5_3_FINAL_STUDY.md).
 Its device tests are not evidence that this APK works on the user's Mali phone.
+
+### Revision 14 — native build and APK validation passed
+
+- Implementation `e652a7fba62b5ab239d570dd4ca88331c7a53d2f` passed
+  [workflow 43570439821](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43570439821),
+  job 132373441117. This includes the new production-code lifetime fixture,
+  native editor/codec compilation, runtime and ARM64 dependency audits, package
+  identity, APK v3 signature and matching-update-certificate checks.
+- Provenance merge `c57f05fee139e4047974e4edf692916578fb051d` contains the
+  implementation. The downloaded source lock and corresponding source patch
+  were checked against the exact prepared stable source plus all four patches.
+- Artifact `14104199144`, `blender-5.3.0-android-full-arm64`, expires 2026-11-28.
+  ZIP size 289,629,199 bytes; SHA256
+  `d155e26a1983146d7113c8fe1345ea26b43030607559aeda34441f8153efff1e`.
+- APK `blender-5.3.0-android.14-arm64.apk`, 291,768,528 bytes, 155 native libraries,
+  versionCode 5030014, versionName 5.3.0-android.14, package org.blender.androidport.
+  APK SHA256 `8f58492145edaa1f67995c896a3fadb911c826ceba52ca23e9d44b9b027c0740`.
+  ZIP/APK digests, API 31/34 identity, source provenance and the retained certificate
+  `45971c45d2531454994f4382a402bdb3a491159cbee356a8a0effd831c76ab3e`
+  were verified after download. The reuse fixture also passes locally with
+  identical attachment handles and dimensions for the replacement framebuffer.
+- Phone lag/crash resolution is not yet confirmed. The user has not provided
+  the process-exit report or previous-session log. Retest revision 14, and if it
+  still exits, reopen once and supply those reports before attributing a cause.

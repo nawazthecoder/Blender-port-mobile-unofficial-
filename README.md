@@ -4,12 +4,12 @@ Android ARM64 port of the official **Blender 5.3.0 stable** source, using the
 unofficial simfeo Android backend and the phone controls/fixes developed here.
 Not affiliated with the Blender Foundation.
 
-**Status: revision 14 fixes a confirmed presentation-resource cleanup bug and is
-awaiting native build/package validation.** Revision 13 built successfully, but
-the user reports lag and a quick crash on the phone. See
-[graphics stability](docs/GRAPHICS_STABILITY.md) for the fix and verification limits.
-The previous build is recorded in
-[workflow 43455837164](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43455837164).
+**Status: revision 14 full native ARM64 build and APK validation passed in
+[workflow 43570439821](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43570439821).**
+It fixes a confirmed presentation-resource cleanup gap found after the user's
+revision 13 lag/crash report. Another phone test is still required to establish
+whether it resolves that incident. See [graphics stability](docs/GRAPHICS_STABILITY.md).
+Download the `blender-5.3.0-android-full-arm64` artifact from the successful run.
 
 The new source lock uses official tag `v5.3.0`, commit
 `02f0899d78e374b63e7181d9061e1f7ab03419cc`. Blender's release/file-format metadata

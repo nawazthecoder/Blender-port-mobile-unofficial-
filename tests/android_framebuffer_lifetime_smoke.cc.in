@@ -121,7 +121,8 @@ static void reset() {
 static void framebuffer(uintptr_t fb, std::initializer_list<uintptr_t> views) {
   VKRenderPassFallback::FramebufferKey key = {};
   key.render_pass = handle<VkRenderPass>(1);
-  key.width = uint32_t(fb);
+  key.width = key.height = 64;
+  key.layers = 1;
   for (auto view : views) key.views[key.view_count++] = handle<VkImageView>(view);
   device.render_pass_fallback.framebuffers_.lookup_or_add_cb(key, [&]() {
     return handle<VkFramebuffer>(fb);

@@ -26,9 +26,12 @@ causes the regression test to fail. The existing preparation/package tests and
 mouse/Vulkan regressions also pass. These tests do not execute a Mali driver.
 
 Revision 14 remains Blender 5.3.0, with versionCode 5030014 and versionName
-5.3.0-android.14. Native build/package validation and another phone test are
-pending. App identity, update certificate, render resolution and mouse controls
-are retained. If the next APK still exits, reopen it once and collect
+5.3.0-android.14. Full native ARM64 build, the new regression fixture, package
+audit, identity, APK v3 signature and update-certificate checks passed in
+[workflow 43570439821](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43570439821).
+The downloaded ZIP/APK hashes, source lock and corresponding source patch match
+the validated implementation. Another phone test remains pending. App identity,
+update certificate, render resolution and mouse controls are retained. If the next APK still exits, reopen it once and collect
 blender-previous.log and blender-last-exit.txt from Downloads (or the log path
 shown at launch). Android may also supply blender-last-exit.trace.
 
