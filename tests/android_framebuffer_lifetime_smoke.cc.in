@@ -1,0 +1,214 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#include <vulkan/vulkan.h>
+#include <algorithm>
+#include <atomic>
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <iostream>
+#include <map>
+#include <mutex>
+#include <span>
+#include <string>
+#include <thread>
+#include <utility>
+#include <variant>
+#include <vector>
+
+struct VolkDeviceTable {};
+namespace blender::gpu {
+using TimelineValue = uint64_t;
+using ResourceHandle = uint64_t;
+using VmaAllocation = uintptr_t;
+using Mutex = std::mutex;
+template<class T> using Span = std::span<T>;
+template<class T> struct Vector : std::vector<T> {
+  using std::vector<T>::vector;
+  void append(T item) { this->push_back(std::move(item)); }
+  bool is_empty() const { return this->empty(); }
+  void remove(int64_t start, int64_t count) {
+    this->erase(this->begin() + start, this->begin() + start + count);
+  }
+};
+template<class K, class V> struct Map {
+  struct Entry { K key; V value; };
+  Vector<Entry> entries;
+  auto &items() { return entries; }
+  size_t size() const { return entries.size(); }
+  template<class Fn> V &lookup_or_add_cb(const K &key, Fn fn) {
+    for (auto &entry : entries) if (entry.key == key) return entry.value;
+    entries.append({key, fn()});
+    return entries.back().value;
+  }
+  void remove_contained(const K &key) {
+    auto it = std::find_if(entries.begin(), entries.end(), [&](auto &e) { return e.key == key; });
+    assert(it != entries.end());
+    entries.erase(it);
+  }
+};
+inline uint64_t XXH3_64bits(const void *, size_t) { return 0; }
+class VKDevice;
+class VKDiscardPool;
+class VKBackend;
+namespace render_graph {
+struct VKBeginRenderingData;
+enum class VKResourceType { IMAGE, BUFFER };
+struct VKResourceStateTracker {
+  struct DiscardableResource {
+    VKResourceType type;
+    ResourceHandle handle;
+    VmaAllocation allocation;
+    Vector<std::variant<VkImageView, VkBufferView>> views;
+  };
+};
+}
+struct VKDescriptorPools { void recycle(VkDescriptorPool) {} };
+#define BLI_assert assert
+@FALLBACK_CLASS@
+@TIMELINE_CLASS@
+@POOL_CLASS@
+
+static std::vector<std::string> events;
+template<class H> H handle(uintptr_t id) { return reinterpret_cast<H>(id); }
+template<class H> uintptr_t id(H h) { return reinterpret_cast<uintptr_t>(h); }
+struct MockFunctions {
+  void vkDestroyFramebuffer(VkDevice, VkFramebuffer h, const void *) {
+    events.push_back("F:" + std::to_string(id(h)));
+  }
+  void vkDestroyImageView(VkDevice, VkImageView h, const void *) {
+    events.push_back("V:" + std::to_string(id(h)));
+  }
+  template<class... A> void vkDestroyBufferView(A...) {}
+  template<class... A> void vkDestroyPipeline(A...) {}
+  template<class... A> void vkDestroyPipelineLayout(A...) {}
+  template<class... A> void vkDestroyShaderModule(A...) {}
+  template<class... A> void vkDestroyAccelerationStructureKHR(A...) {}
+};
+struct MockResources {
+  std::map<ResourceHandle, Vector<std::variant<VkImageView, VkBufferView>>> views;
+  auto take_views(ResourceHandle h) { return std::exchange(views[h], {}); }
+  void remove_swapchain_image(ResourceHandle h) { views.erase(h); }
+  void remove_image(ResourceHandle) {}
+  VkImage get_vk_image(ResourceHandle h) { return handle<VkImage>(h); }
+  VkBuffer remove_buffer(ResourceHandle h) { return handle<VkBuffer>(h); }
+};
+class VKDevice {
+ public:
+  VKRenderPassFallback render_pass_fallback;
+  MockFunctions functions;
+  MockResources resources;
+  VkDevice vk_handle() const { return handle<VkDevice>(1); }
+  int mem_allocator_get() const { return 0; }
+};
+class VKBackend {
+ public:
+  VKDevice device;
+  static VKBackend &get() { static VKBackend backend; return backend; }
+};
+void vmaFreeMemory(int, VmaAllocation) {}
+void vmaDestroyImage(int, VkImage, VmaAllocation) {}
+void vmaDestroyBuffer(int, VkBuffer, VmaAllocation) {}
+@METHODS@
+
+static VKDevice &device = VKBackend::get().device;
+static void reset() {
+  events.clear();
+  device.resources.views.clear();
+  auto &cache = device.render_pass_fallback;
+  cache.framebuffers_.entries.clear();
+  cache.vk_device_ = handle<VkDevice>(1);
+}
+static void framebuffer(uintptr_t fb, std::initializer_list<uintptr_t> views) {
+  VKRenderPassFallback::FramebufferKey key = {};
+  key.render_pass = handle<VkRenderPass>(1);
+  key.width = key.height = 64;
+  key.layers = 1;
+  for (auto view : views) key.views[key.view_count++] = handle<VkImageView>(view);
+  device.render_pass_fallback.framebuffers_.lookup_or_add_cb(key, [&]() {
+    return handle<VkFramebuffer>(fb);
+  });
+}
+static size_t event_index(const std::string &s) {
+  auto i = std::find(events.begin(), events.end(), s);
+  assert(i != events.end());
+  assert(std::count(events.begin(), events.end(), s) == 1);
+  return size_t(i - events.begin());
+}
+static void presentation_cleanup() {
+  reset();
+  VKDiscardPool pool;
+  pool.timeline_ = 5;
+  framebuffer(11, {101});
+  device.resources.views[1001].append(handle<VkImageView>(101));
+  pool.discard_swapchain_image(1001);
+  pool.destroy_discarded_resources(device, 4);
+  assert(events.empty() && device.render_pass_fallback.framebuffer_count() == 1);
+  pool.destroy_discarded_resources(device, 5);
+  const bool presentation_cleanup = device.render_pass_fallback.framebuffer_count() == 0;
+  assert(presentation_cleanup);
+  assert(event_index("F:11") < event_index("V:101"));
+  pool.destroy_discarded_resources(device, 6);
+  assert(events.size() == 2);
+  // Reusing a Vulkan view handle must not retrieve a framebuffer from an older image.
+  framebuffer(12, {101});
+  auto retired = device.render_pass_fallback.take_framebuffers_for_view(handle<VkImageView>(101));
+  assert(retired.size() == 1 && retired[0] == handle<VkFramebuffer>(12));
+}
+static void explicit_views() {
+  reset();
+  VKDiscardPool pool;
+  pool.timeline_ = 10;
+  framebuffer(11, {101, 102});
+  framebuffer(12, {101});
+  framebuffer(13, {103});
+  pool.discard_image_view(handle<VkImageView>(101));
+  pool.discard_image_view(handle<VkImageView>(102));
+  pool.destroy_discarded_resources(device, 9);
+  assert(events.empty());
+  pool.destroy_discarded_resources(device, 10);
+  assert(event_index("F:11") < event_index("V:101"));
+  assert(event_index("F:12") < event_index("V:101"));
+  assert(events.size() == 4 && device.render_pass_fallback.framebuffer_count() == 1);
+}
+static void batched_views() {
+  reset();
+  VKDiscardPool pool;
+  pool.timeline_ = 999;
+  framebuffer(21, {201, 202});
+  using Resource = render_graph::VKResourceStateTracker::DiscardableResource;
+  Vector<Resource> resources;
+  resources.append({render_graph::VKResourceType::IMAGE, 2001, 0,
+                    {handle<VkImageView>(201), handle<VkImageView>(202)}});
+  pool.discard_resources(resources, 7);
+  pool.destroy_discarded_resources(device, 6);
+  assert(events.empty());
+  pool.destroy_discarded_resources(device, 7);
+  assert(event_index("F:21") < event_index("V:201"));
+  assert(event_index("F:21") < event_index("V:202"));
+  assert(events.size() == 3);
+}
+static void concurrent_discard() {
+  reset();
+  VKDiscardPool pool;
+  pool.timeline_ = 10;
+  for (uintptr_t i = 1; i <= 256; i++) framebuffer(i, {1000 + i});
+  std::atomic<bool> done = false;
+  std::thread producer([&]() {
+    for (uintptr_t i = 1; i <= 256; i++) pool.discard_image_view(handle<VkImageView>(1000 + i));
+    done = true;
+  });
+  while (!done) { pool.destroy_discarded_resources(device, 10); std::this_thread::yield(); }
+  producer.join();
+  pool.destroy_discarded_resources(device, 10);
+  assert(events.size() == 512 && device.render_pass_fallback.framebuffer_count() == 0);
+  for (uintptr_t i = 1; i <= 256; i++) {
+    assert(event_index("F:" + std::to_string(i)) < event_index("V:" + std::to_string(1000 + i)));
+  }
+}
+int main() {
+  presentation_cleanup(); explicit_views(); batched_views(); concurrent_discard();
+  std::cout << "Framebuffer retirement PASS: presentation, timeline, shared views, handle reuse, concurrent cleanup\n";
+  return 0;
+}
+} // namespace blender::gpu
+int main() { return blender::gpu::main(); }

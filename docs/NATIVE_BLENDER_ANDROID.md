@@ -1,39 +1,19 @@
-# Actual Blender native Android build
+# Native Blender Android status
 
-The existing android-app directory is an OpenGL ES diagnostic host, NOT Blender.
-Two additional workflows are now available:
+The current target is official Blender **5.3.0 stable**, port revision **14**.
+See [upgrade details](UPGRADE_5_3.md), the exact [source lock](../config/blender-android.json)
+and [build history](PORT_PROGRESS.md). Full native compilation and APK validation
+passed in [workflow 43570439821](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43570439821).
+Revision 14 fixes a presentation framebuffer-retirement gap investigated after
+the revision 13 phone lag/crash report. The APK is 5.3.0-android.14 with 155 ARM64
+native libraries and the existing signing certificate. Another phone test is
+pending; CI and CPU fixtures do not establish Mali driver stability.
 
-1. Build Actual Blender Android Vulkan Editor: compile the actual Blender C++ editor
-   with Android GHOST/Vulkan and package a native ARM64 APK. It uses pinned
-   upstream Android source commit 4bd0075178bdf71c9aa3de139af6d07e9da61b4d.
-2. Verify Native Blender Android Test APK: download and checksum-verify a
-   ready-built **unmodified third-party Blender Android** APK so an actual
-   modelling editor can be tried while the source compile is being resolved.
+Use the full native editor workflow, which compiles libblender.so and packages
+the real Python/scripts/assets payload. It does not use the historical diagnostic
+launcher scaffold in android-app/. APK audits, signature and matching-update-key
+checks must pass before release. Passing those checks does not establish that
+every feature works on a phone.
 
-Source and credits: https://github.com/simfeo/blender
-Upstream build guide: https://github.com/simfeo/blender/blob/android/build_files/android/BUILDING.md
-Upstream compiled APK release: https://github.com/simfeo/blender/releases/tag/android-alpha-4
-
-Blender as a whole is GPL-3.0. The actual Blender Android code and binary
-are derived from this existing GPL port and authored by its contributors.
-All corresponding source and notices must accompany redistribution.
-The upstream binary is NOT a build made by this repository; see the
-verified APK workflow for the binary SHA256 and provenance.
-
-Android OpenGL ES 3.x is not desktop OpenGL 4.3. The real port uses Vulkan
-and an Android-specific GHOST window implementation instead. Its upstream
-requirements include Android 12+ ARM64 and a compatible Vulkan driver.
-The compiled Android library set specifically requires NDK r30 beta1; the
-r27 build experiments from the diagnostic stage cannot link those libraries.
-
-This user's Redmi 13C 5G with 4 GB RAM is a reason to start with the lite
-modeling editor, and to expect slower shader compilation and limited RAM.
-Some Mali GPUs may show Vulkan visual errors; a diagnostic GLES grid
-working proves nothing about Vulkan Blender. Test actual device launch,
-mesh editing, file opening/saving, memory use, and screen rotation.
-
-**Status reporting:** until the source workflow reports success and has
-an APK artifact, the source compile is not confirmed. Even then, a native
-APK artifact is not proof that the editor runs correctly on this specific phone.
-
-No changes are made to Polyvra or Forge Mobile Studio.
+The package is org.blender.androidport. VersionCode 5030014 updates the existing
+app when signed with the retained certificate. Save projects before updating.

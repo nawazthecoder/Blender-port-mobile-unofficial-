@@ -1,0 +1,40 @@
+diff --git a/intern/ghost/intern/GHOST_ContextVK.cc b/intern/ghost/intern/GHOST_ContextVK.cc
+index c6a604f7..3ecaf825 100644
+--- a/intern/ghost/intern/GHOST_ContextVK.cc
++++ b/intern/ghost/intern/GHOST_ContextVK.cc
+@@ -346,8 +346,8 @@ class GHOST_DeviceVK {
+     vma_allocator_create_info.instance = vk_instance;
+ #ifdef __ANDROID__
+     VmaVulkanFunctions vulkan_functions = {};
+-    vulkan_functions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
+-    vulkan_functions.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
++    vulkan_functions.vkGetInstanceProcAddr = volk::vkGetInstanceProcAddr;
++    vulkan_functions.vkGetDeviceProcAddr = volk::vkGetDeviceProcAddr;
+     vma_allocator_create_info.pVulkanFunctions = &vulkan_functions;
+ #endif
+     vma_allocator_create_info.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+diff --git a/source/blender/editors/interface/interface_handlers.cc b/source/blender/editors/interface/interface_handlers.cc
+index 86378c98..7f3090c8 100644
+--- a/source/blender/editors/interface/interface_handlers.cc
++++ b/source/blender/editors/interface/interface_handlers.cc
+@@ -11812,7 +11812,7 @@ static int handle_menu_touch_scroll_event(bContext *C,
+                                           const bool inside)
+ {
+   ARegion *region = menu->region;
+-  Block *block = static_cast<Block *>(region->runtime->uiblocks.first);
++  Block *block = region->runtime->uiblocks.first();
+   if (block == nullptr) {
+     return WM_UI_HANDLER_CONTINUE;
+   }
+diff --git a/source/blender/windowmanager/intern/wm_virtual_keyboard.cc b/source/blender/windowmanager/intern/wm_virtual_keyboard.cc
+index 59407860..d9d27ecb 100644
+--- a/source/blender/windowmanager/intern/wm_virtual_keyboard.cc
++++ b/source/blender/windowmanager/intern/wm_virtual_keyboard.cc
+@@ -44,6 +44,7 @@
+ #include "BLI_listbase.hh"
+ #include "BLI_math_base.hh"
+ #include "BLI_math_vector.hh"
++#include "BLI_math_vector_c.hh"
+ #include "BLI_rect.hh"
+ #include "BLI_string.hh"
+ #include "BLI_string_utf8.hh"

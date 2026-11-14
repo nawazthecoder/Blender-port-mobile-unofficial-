@@ -1,0 +1,56 @@
+diff --git a/build_files/android/apk/app/build.gradle b/build_files/android/apk/app/build.gradle
+index a23f60e6..fa58dca2 100644
+--- a/build_files/android/apk/app/build.gradle
++++ b/build_files/android/apk/app/build.gradle
+@@ -24,8 +24,8 @@ android {
+     applicationId 'org.blender.blender'
+     minSdk 31
+     targetSdk 34
+-    versionCode 1
+-    versionName '5.2.3-android.2'
++    versionCode 5020303
++    versionName '5.2.3-android.3'
+     ndk { abiFilters 'arm64-v8a' }
+   }
+ 
+diff --git a/build_files/android/apk/package.sh b/build_files/android/apk/package.sh
+index b0ac1df9..c47a97ce 100755
+--- a/build_files/android/apk/package.sh
++++ b/build_files/android/apk/package.sh
+@@ -377,7 +377,7 @@ fi
+   "$STAGE/rescompiled/res.zip" \
+   -A "$ASSETS" -0 zip \
+   --min-sdk-version "$ANDROID_API" --target-sdk-version "$ANDROID_TARGET_API" \
+-  --version-code 5020302 --version-name "5.2.3-android.2"
++  --version-code 5020303 --version-name "5.2.3-android.3"
+ 
+ echo "[apk] assembling"
+ cp "$STAGE/base.apk" "$OUT"
+diff --git a/build_files/android/build_apk.sh b/build_files/android/build_apk.sh
+index 7eece6ac..55406ede 100755
+--- a/build_files/android/build_apk.sh
++++ b/build_files/android/build_apk.sh
+@@ -77,7 +77,9 @@ cmake -S . -B "$BUILD" -G Ninja "${LAUNCHER_ARGS[@]}" \
+   -DANDROID_ABI="$ANDROID_ABI" -DANDROID_PLATFORM="android-$ANDROID_API" \
+   -DHOST_C_COMPILER="$ANDROID_HOST_CC" -DHOST_CXX_COMPILER="$ANDROID_HOST_CXX" \
+   -DBLENDER_ANDROID_CONFIG="$CONFIG" "${ADRENOTOOLS_ARGS[@]}" "${OIDN_ARGS[@]}"
+-ninja -j "${BLENDER_BUILD_JOBS:-2}" -C "$BUILD" blender
++# CI may collect several independent compiler errors in one run. A failed
++# command still prevents packaging; the local default remains fail-fast.
++ninja -j "${BLENDER_BUILD_JOBS:-2}" -k "${BLENDER_BUILD_KEEP_GOING:-1}" -C "$BUILD" blender
+ # Built separately: nothing links them, the glTF add-on dlopens them. Only the
+ # configs that enable the codecs define these targets, so ask ninja first.
+ for _bridge in bf_intern_meshopt_bridge bf_intern_draco_bridge; do
+diff --git a/source/blender/editors/interface/interface_handlers.cc b/source/blender/editors/interface/interface_handlers.cc
+index 8fb39661..1f476e4c 100644
+--- a/source/blender/editors/interface/interface_handlers.cc
++++ b/source/blender/editors/interface/interface_handlers.cc
+@@ -11753,7 +11753,7 @@ static int handle_menu_touch_scroll_event(bContext *C,
+                                           const bool inside)
+ {
+   ARegion *region = menu->region;
+-  Block *block = region->runtime->uiblocks.first();
++  Block *block = static_cast<Block *>(region->runtime->uiblocks.first);
+   if (block == nullptr) {
+     return WM_UI_HANDLER_CONTINUE;
+   }

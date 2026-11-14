@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "blender_version": "5.3.0",
+  "release_cycle": "release",
+  "source_repository": "https://github.com/blender/blender.git",
+  "source_tag": "v5.3.0",
+  "source_commit": "02f0899d78e374b63e7181d9061e1f7ab03419cc",
+  "android_port_repository": "https://github.com/simfeo/blender.git",
+  "android_port_commit": "4bd0075178bdf71c9aa3de139af6d07e9da61b4d",
+  "android_port_base": "3bcf2d172c1f879561b600d02707617912d22c7d",
+  "patch": "patches/blender-5.3.0-android.patch",
+  "patch_sha256": "5fca19bee2ea009650b5bfa9ec0cb1a12efa06393c3944ea72c474f7aa8ef762",
+  "android_libraries_commit": "59001bef2a4983d0f42e3281cf622a5734c1cb02",
+  "ndk_version": "30.0.16248370",
+  "vulkan_headers_version": "1.4.341",
+  "android_min_api": 31,
+  "configuration": "full",
+  "port_revision": 14,
+  "status": "revision14-native-ci-validated-device-runtime-unverified",
+  "additional_patches": [
+    {
+      "path": "patches/0014-blender-5.3-build-fixes.patch",
+      "sha256": "fb1a3402867faf07e26a21805c326aaca8a940c8cd4311f6ebee0c63818cddf8"
+    },
+    {
+      "path": "patches/0015-blender-5.3-ui-and-loader-fixes.patch",
+      "sha256": "faeae479cb405375c7baf7205eb46eeee549ebef0a55107d049b16e768153fac"
+    },
+    {
+      "path": "patches/0016-android-framebuffer-retirement.patch",
+      "sha256": "8e74055a3320fb4cda79b8c50e4ad404907821967c36791554d2df45d3c90ae8"
+    }
+  ],
+  "host_libraries_commit": "e92f1a54a92c774fbeb0cf51c4652bc510d9a50a",
+  "supplemental_android_dependencies": [
+    "Jolt 5.6.0",
+    "OpenTimelineIO 31e3101e750be2aa992274ac02c0679077872e57",
+    "KTX 4.4.2",
+    "RapidJSON 24b5e7a8b27f42fa16b96fc70aade9106cf7102f",
+    "minizip-ng 4.2.2",
+    "pybind11 3.0.1",
+    "Zstandard 1.5.7"
+  ],
+  "previous_validated_source_commit": "9c93feb403b4ca0f96ab5dc63e391c4b3978c57c"
+}

@@ -1,11 +1,27 @@
-name: Build Actual Blender Android Vulkan Editor
+name: Build Blender 5.3.0 Full Android Editor
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/real-blender-native.yml"
+      - "config/blender-android.json"
+      - "patches/**"
+      - "scripts/**"
   push:
     branches: [main]
-    paths: ['.github/workflows/real-blender-native.yml']
+    paths:
+      - '.github/workflows/real-blender-native.yml'
+      - 'config/blender-android.json'
+      - 'patches/**'
+      - 'scripts/prepare_stable_android.py'
+      - 'scripts/fetch_native_dependencies.sh'
+      - 'scripts/check_android_apk.py'
 permissions:
   contents: read
+concurrency:
+  group: blender-stable-android-${{ github.ref }}
+  # Preserve expensive compiler work while newer checkpoints queue.
+  cancel-in-progress: false
 jobs:
   blender:
     runs-on: ubuntu-24.04
@@ -14,99 +30,219 @@ jobs:
       GIT_LFS_SKIP_SMUDGE: '1'
       GIT_TERMINAL_PROMPT: '0'
       ANDROID_NDK_VERSION: 30.0.16248370
+      BLENDER_BUILD_JOBS: '2'
+      BLENDER_BUILD_KEEP_GOING: '20'
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+      CCACHE_DIR: ${{ github.workspace }}/ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 2G
     steps:
       - uses: actions/checkout@v4
         with:
           path: user-repo
       - uses: actions/checkout@v4
         with:
-          repository: simfeo/blender
-          ref: 4bd0075178bdf71c9aa3de139af6d07e9da61b4d
+          repository: blender/blender
+          ref: 02f0899d78e374b63e7181d9061e1f7ab03419cc
           path: blender-source
           lfs: false
           submodules: false
           fetch-depth: 1
-      - name: Verify actual Android Blender sources
-        run: |
-          test "$(git -C blender-source rev-parse HEAD)" = "4bd0075178bdf71c9aa3de139af6d07e9da61b4d"
-          test -f blender-source/build_files/android/build_apk.sh
-          df -h .
+      - name: Test preparation and package guards
+        working-directory: user-repo
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Prepare locked stable Blender and Android backport
+        run: python3 user-repo/scripts/prepare_stable_android.py blender-source
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - name: Install host dependencies
+      - name: Install build tools
         run: |
-          set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build git-lfs patchelf clang-18 gcc-14 g++-14 unzip zip python3
+            cmake ninja-build git-lfs patchelf clang-18 gcc-14 g++-14 unzip zip python3 ccache
+          df -h .
+      - name: Check native add-on dependency collection
+        run: python3 user-repo/tests/native_library_collection_smoke.py blender-source
+      - name: Check virtual mouse touch sequences
+        run: python3 user-repo/tests/android_virtual_mouse_smoke.py blender-source
       - uses: android-actions/setup-android@v4
         with:
           packages: ''
-      - name: Install stable Android NDK r30
+      - name: Install Android NDK and SDK
         run: |
-          set -euo pipefail
           sdkmanager --channel=3 "ndk;$ANDROID_NDK_VERSION" \
             "platforms;android-35" "build-tools;35.0.1" "platform-tools"
           test -f "$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION/build/cmake/android.toolchain.cmake"
-          if [ ! -e "$HOME/android-sdk" ]; then
-            ln -s "$ANDROID_HOME" "$HOME/android-sdk"
-          else
-            test "$HOME/android-sdk" -ef "$ANDROID_HOME"
-          fi
-      - name: Download corresponding Blender LFS and Android dependencies
+      - name: Restore pinned library payloads
+        id: deps-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            blender-source/lib/linux_x64
+            blender-source/lib/android_arm64
+            blender-source/.git/modules/lib
+          key: android-libs-5.3.0-e92f1a54-59001bef-v1
+          restore-keys: android-libs-5.2.3-59001bef-v1
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ccache
+          key: android-ccache-r30-${{ github.sha }}
+          restore-keys: android-ccache-r30-
+      - name: Fetch real host and target libraries, including LFS payloads
+        id: dependencies
         working-directory: blender-source
-        run: |
-          set -euo pipefail
-          git lfs install --local
-          # GitHub is only a Blender Git mirror; its LFS endpoint lacks these objects.
-          git config --local lfs.url https://projects.blender.org/blender/blender.git/info/lfs
-          git config --local credential.https://projects.blender.org.helper \
-            '!f() { echo username=; echo password=; }; f'
-          git lfs pull
-          git submodule update --init --depth 1 lib/linux_x64 lib/android_arm64
-          test -d lib/android_arm64/python
-          test -d lib/linux_x64
+        run: bash ../user-repo/scripts/fetch_native_dependencies.sh
       - name: Install matching Vulkan headers
         run: |
-          set -euo pipefail
           curl -fL --retry 3 \
             'https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.341.tar.gz' \
             -o /tmp/vulkan-headers.tar.gz
-          mkdir -p /tmp/vulkan-headers
+          mkdir -p /tmp/vulkan-headers blender_build_android/lib/vulkan_headers
           tar -xzf /tmp/vulkan-headers.tar.gz -C /tmp/vulkan-headers
-          mkdir -p blender_build_android/lib/vulkan_headers
           cp -R /tmp/vulkan-headers/Vulkan-Headers-1.4.341/include \
             blender_build_android/lib/vulkan_headers/include
-      - name: Cross-compile actual Blender C++ and package APK
+      - name: Check Vulkan synchronization and image acquisition regressions
+        run: >-
+          python3 user-repo/tests/android_vulkan_regressions.py blender-source
+          --vulkan-include blender_build_android/lib/vulkan_headers/include
+      - name: Check framebuffer cache retirement and destruction ordering
+        run: >-
+          python3 user-repo/tests/android_framebuffer_lifetime_smoke.py blender-source
+          --vulkan-include blender_build_android/lib/vulkan_headers/include
+      # Public development signing identity, retained for installable future updates.
+      - name: Restore Android port development signing key
+        id: signing-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: blender_build_android/android-debug.keystore
+          key: android-port-development-signing-v1
+      - name: Restore pinned static denoiser build and downloads
+        id: oidn-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: blender_build_android/oidn-deps
+          key: android-oidn-2.5.0-ispc1.30-api31-r30-59001bef-v2-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: android-oidn-2.5.0-ispc1.30-api31-r30-59001bef-v2-
+      - name: Restore Blender 5.3 Android dependency build progress
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            blender_build_android/release-5.3-deps
+            blender-source/lib/android_arm64/jolt
+            blender-source/lib/android_arm64/opentimelineio
+            blender-source/lib/android_arm64/ktx
+            blender-source/lib/android_arm64/rapidjson53
+            blender-source/lib/android_arm64/minizipng53
+            blender-source/lib/android_arm64/pybind1153
+            blender-source/lib/android_arm64/zstd53
+          key: android-release53-r30-api31-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: android-release53-r30-api31-v1-
+      - name: Compile full Blender and package Android APK
+        id: compile
         working-directory: blender-source
         env:
           ANDROID_HOST_CC: clang-18
           ANDROID_HOST_CXX: clang++-18
         run: |
           set -euo pipefail
-          bash build_files/android/build_apk.sh lite 2>&1 | tee build.log
-          test -s ../blender_build_android/build_android_lite/lib/libblender.so
-          apk=../blender_build_android/android_apk_stage_lite/blender-lite.apk
-          test -s "$apk"
-          unzip -Z1 "$apk" | grep -Fx 'lib/arm64-v8a/libblender.so'
-          mkdir -p ../artifacts
-          cp "$apk" ../artifacts/
-          sha256sum ../artifacts/blender-lite.apk > ../artifacts/SHA256SUMS
-          echo 'Corresponding GPL source: https://github.com/simfeo/blender/tree/4bd0075178bdf71c9aa3de139af6d07e9da61b4d' > ../artifacts/SOURCE.txt
-      - name: Upload logs on compile failure
-        if: failure()
+          python3 build_files/android/build.py full 2>&1 | tee build.log
+          test -s ../blender_build_android/build_android_full/lib/libblender.so
+      - name: Validate full native APK and preserve build provenance
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          cp blender_build_android/android_apk_stage_full/blender-full.apk artifacts/blender-5.3.0-android-full.apk
+          python3 user-repo/scripts/check_android_apk.py artifacts/blender-5.3.0-android-full.apk \
+            --readelf "$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
+            --report artifacts/package-audit.json
+          "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose artifacts/blender-5.3.0-android-full.apk
+          "$ANDROID_HOME/build-tools/35.0.1/aapt2" dump badging artifacts/blender-5.3.0-android-full.apk > artifacts/apk-identity.txt
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          identity = Path('artifacts/apk-identity.txt').read_text()
+          assert "package: name='org.blender.androidport'" in identity, identity[:500]
+          assert "versionCode='5030014'" in identity, identity[:500]
+          assert "application-label:'Blender Android'" in identity, identity[:500]
+          PYCODE
+          "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --print-certs artifacts/blender-5.3.0-android-full.apk > artifacts/signing-certificate.txt
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import re
+          certificate = Path('artifacts/signing-certificate.txt').read_text()
+          actual = re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-fA-F]+)', certificate).group(1).lower()
+          expected = Path('user-repo/config/android-development-certificate.sha256').read_text().strip()
+          assert actual == expected, 'Signing identity changed: this APK would not update Blender Android'
+          PYCODE
+          cp user-repo/docs/GRAPHICS_STABILITY.md artifacts/
+          cp user-repo/docs/VIRTUAL_MOUSE.md artifacts/
+          cp user-repo/config/blender-android.json artifacts/source-lock.json
+          git -C user-repo rev-parse HEAD > artifacts/port-repository-commit.txt
+          cp user-repo/docs/NATIVE_BLENDER_ANDROID.md artifacts/SOURCE-AND-STATUS.md
+          cp user-repo/tests/blender_runtime_smoke.py artifacts/
+          cp -R blender-source/release/license artifacts/licenses
+          (cd artifacts && sha256sum blender-5.3.0-android-full.apk > SHA256SUMS)
+          git -C blender-source diff --cached --binary > artifacts/corresponding-source.patch
+      - name: Save development signing identity after package validation
+        if: success() && steps.signing-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: blender_build_android/android-debug.keystore
+          key: android-port-development-signing-v1
+      - name: Save pinned library payloads after successful dependency verification
+        if: always() && steps.dependencies.outcome == 'success' && steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            blender-source/lib/linux_x64
+            blender-source/lib/android_arm64
+            blender-source/.git/modules/lib
+          key: android-libs-5.3.0-e92f1a54-59001bef-v1
+      - name: Save denoiser downloads and build progress
+        if: always() && steps.compile.outcome != 'skipped' && steps.oidn-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: blender_build_android/oidn-deps
+          key: android-oidn-2.5.0-ispc1.30-api31-r30-59001bef-v2-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Save Blender 5.3 Android dependency progress
+        if: always() && steps.compile.outcome != 'skipped'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            blender_build_android/release-5.3-deps
+            blender-source/lib/android_arm64/jolt
+            blender-source/lib/android_arm64/opentimelineio
+            blender-source/lib/android_arm64/ktx
+            blender-source/lib/android_arm64/rapidjson53
+            blender-source/lib/android_arm64/minizipng53
+            blender-source/lib/android_arm64/pybind1153
+            blender-source/lib/android_arm64/zstd53
+          key: android-release53-r30-api31-v1-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Save compiler progress even after a compile failure
+        if: always() && steps.compile.outcome != 'skipped'
+        uses: actions/cache/save@v4
+        with:
+          path: ccache
+          key: android-ccache-r30-${{ github.sha }}
+      - name: Preserve build diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: real-blender-native-build-logs
-          path: blender-source/build.log
+          name: blender-5.3.0-android-build-diagnostics
+          path: |
+            blender-source/build.log
+            blender_build_android/**/CMakeConfigureLog.yaml
+            blender_build_android/**/CMakeCache.txt
+            user-repo/config/blender-android.json
           if-no-files-found: warn
-      - name: Upload actual Blender Vulkan APK
-        if: success()
+          retention-days: 14
+      - name: Upload full Blender APK only after package validation
         uses: actions/upload-artifact@v4
         with:
-          name: actual-blender-android-lite-arm64
+          name: blender-5.3.0-android-full-arm64
           path: artifacts/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
