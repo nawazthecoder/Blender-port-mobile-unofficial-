@@ -4,12 +4,12 @@ Android ARM64 port of the official **Blender 5.3.0 stable** source, using the
 unofficial simfeo Android backend and the phone controls/fixes developed here.
 Not affiliated with the Blender Foundation.
 
-**Status: revision 13 full native ARM64 compilation and APK validation passed in
+**Status: revision 14 fixes a confirmed presentation-resource cleanup bug and is
+awaiting native build/package validation.** Revision 13 built successfully, but
+the user reports lag and a quick crash on the phone. See
+[graphics stability](docs/GRAPHICS_STABILITY.md) for the fix and verification limits.
+The previous build is recorded in
 [workflow 43455837164](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43455837164).
-Phone testing, including Shading stability, remains pending.** Download the
-`blender-5.3.0-android-full-arm64` artifact from that successful run. The previous
-validated Blender 5.2.3 Android revision 12 remains recorded in
-[workflow 43175475404](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43175475404).
 
 The new source lock uses official tag `v5.3.0`, commit
 `02f0899d78e374b63e7181d9061e1f7ab03419cc`. Blender's release/file-format metadata
@@ -54,8 +54,8 @@ Linux x86-64 build host. The generated APK targets Android ARM64.
 
 ## Installation and verification
 
-The package stays **Blender Android** (`org.blender.androidport`). Revision 13
-uses versionCode **5030013** and versionName **5.3.0-android.13**. CI checks the
+The package stays **Blender Android** (`org.blender.androidport`). Revision 14
+uses versionCode **5030014** and versionName **5.3.0-android.14**. CI checks the
 same signing certificate as revisions 9–12, so an unrelated key cannot silently
 produce an incompatible update. Save projects before installing an update.
 

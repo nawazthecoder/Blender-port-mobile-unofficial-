@@ -15,8 +15,8 @@
   "vulkan_headers_version": "1.4.341",
   "android_min_api": 31,
   "configuration": "full",
-  "port_revision": 13,
-  "status": "revision13-native-ci-validated-device-runtime-unverified",
+  "port_revision": 14,
+  "status": "revision14-framebuffer-retirement-fix-native-build-pending",
   "additional_patches": [
     {
       "path": "patches/0014-blender-5.3-build-fixes.patch",
@@ -25,6 +25,10 @@
     {
       "path": "patches/0015-blender-5.3-ui-and-loader-fixes.patch",
       "sha256": "faeae479cb405375c7baf7205eb46eeee549ebef0a55107d049b16e768153fac"
+    },
+    {
+      "path": "patches/0016-android-framebuffer-retirement.patch",
+      "sha256": "8e74055a3320fb4cda79b8c50e4ad404907821967c36791554d2df45d3c90ae8"
     }
   ],
   "host_libraries_commit": "e92f1a54a92c774fbeb0cf51c4652bc510d9a50a",

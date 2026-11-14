@@ -1,5 +1,37 @@
 # Android graphics stability
 
+## Revision 14 — Blender 5.3 presentation cleanup
+
+The user reports lag and an exit after a few seconds with 5.3.0 revision 13.
+No device report has been supplied yet, so a specific phone crash cause is not
+confirmed. Investigation found a concrete error in the 5.3 resource migration:
+completed swapchain resources destroyed their registered image views without
+evicting the classic-render-pass framebuffers referencing those views. This left
+stale GPU objects in the cache, allowing growth and reuse of invalid handles.
+
+- All three view-retirement paths now detach dependent cached framebuffers.
+- Detaching only touches the cache. It returns ownership to the caller and never
+  calls back into the discard pool while holding the cache lock. This permits
+  cleanup while the pool lock is already held, without recursive locking.
+- Batched resources use their submission timeline; explicit views use the pool
+  timeline. Completed presentation views destroy their framebuffers immediately.
+- Framebuffers are destroyed before their referenced image views, exactly once
+  even when a framebuffer references multiple retiring views.
+
+A new ASan/UBSan CPU fixture compiles the actual cache and discard-pool classes,
+method bodies and timeline container with mock Vulkan destruction calls. It checks
+presentation cleanup, deferred destruction, shared views, handle reuse and
+concurrent cleanup. Removing the presentation eviction from the tested method
+causes the regression test to fail. The existing preparation/package tests and
+mouse/Vulkan regressions also pass. These tests do not execute a Mali driver.
+
+Revision 14 remains Blender 5.3.0, with versionCode 5030014 and versionName
+5.3.0-android.14. Native build/package validation and another phone test are
+pending. App identity, update certificate, render resolution and mouse controls
+are retained. If the next APK still exits, reopen it once and collect
+blender-previous.log and blender-last-exit.txt from Downloads (or the log path
+shown at launch). Android may also supply blender-last-exit.trace.
+
 ## Revision 12 — Shading workspace crash hardening
 
 The user reports a crash when opening Shading. A device crash log has not yet

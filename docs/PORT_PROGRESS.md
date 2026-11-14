@@ -389,3 +389,25 @@ The completed native compilation and dependency installs were cached by CI.
 - This establishes a compiled and audited APK. Device startup, Shading/Texture
   Paint, mouse/menu gestures, project save/load and a small Cycles CPU render
   still require phone verification. The prior 5.2.3 revision 12 is preserved.
+
+## Revision 14 — reported 5.3 lag and quick crash
+
+The phone report establishes that revision 13 is not stable on the user's device;
+CI validation did not establish device rendering stability. Inspection found
+missing framebuffer-cache eviction in completed swapchain-view cleanup, plus
+cache-to-pool callbacks unsuitable for cleanup while holding the pool mutex.
+Patch 0016 replaces callbacks with ownership-returning cache detachment, covers
+all three retirement paths, preserves their timelines and orders framebuffer
+destruction before image-view destruction.
+
+The new sanitizer fixture executes production class/method/timeline code with
+mock Vulkan calls, including concurrent cleanup. It passes; a negative control
+with the presentation eviction removed is rejected. The 16 unit tests and mouse
+and Vulkan regressions pass. Native build/package checks and the phone's next
+test remain pending. A phone exit report is still needed to attribute its exact
+crash. No user data or preferences are cleared and no FPS improvement is claimed.
+The source remains official 5.3.0 with APK version 5030014 / 5.3.0-android.14.
+
+Reference checked during investigation: the independent Android port's
+[5.3 final resource-retirement study](https://github.com/Wanderson-Magalhaes/blender_for_android/blob/v5.3.0-android/ANDROID_UPSTREAM_5_3_FINAL_STUDY.md).
+Its device tests are not evidence that this APK works on the user's Mali phone.

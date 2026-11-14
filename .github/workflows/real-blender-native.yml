@@ -109,6 +109,10 @@ jobs:
         run: >-
           python3 user-repo/tests/android_vulkan_regressions.py blender-source
           --vulkan-include blender_build_android/lib/vulkan_headers/include
+      - name: Check framebuffer cache retirement and destruction ordering
+        run: >-
+          python3 user-repo/tests/android_framebuffer_lifetime_smoke.py blender-source
+          --vulkan-include blender_build_android/lib/vulkan_headers/include
       # Public development signing identity, retained for installable future updates.
       - name: Restore Android port development signing key
         id: signing-cache
@@ -161,7 +165,7 @@ jobs:
           from pathlib import Path
           identity = Path('artifacts/apk-identity.txt').read_text()
           assert "package: name='org.blender.androidport'" in identity, identity[:500]
-          assert "versionCode='5030013'" in identity, identity[:500]
+          assert "versionCode='5030014'" in identity, identity[:500]
           assert "application-label:'Blender Android'" in identity, identity[:500]
           PYCODE
           "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --print-certs artifacts/blender-5.3.0-android-full.apk > artifacts/signing-certificate.txt
