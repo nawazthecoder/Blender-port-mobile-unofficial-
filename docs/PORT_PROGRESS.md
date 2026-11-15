@@ -517,3 +517,44 @@ still requires native compilation and the user's next phone test.
 - The updated APK is available for installation. Retest startup on the phone;
   device crash resolution and sustained runtime behavior remain unverified.
   This status checkpoint changes no engine patches or APK contents.
+
+## Revision 16 — Shading device loss and memory pressure
+
+The user confirms revision 15 fixed the startup mutex failure. Shading still
+closes the app. The new startup log ends with VK_ERROR_DEVICE_LOST after 77 s;
+the supplied exit report has reason 3 (Android REASON_LOW_MEMORY), status 0.
+The report's PSS/RSS are last system samples, not peak memory. The accompanying
+previous-session log still contains the older destroyed-mutex failure and is
+not evidence that revision 15's fix regressed. Raw uploaded logs remain private.
+The exact GPU fault cannot be proven from these text logs alone.
+
+Inspection found an invalid texture-pool compatibility check: VmaAllocationInfo
+memoryType is an actual index, but index zero was treated as unrestricted. Pool
+reuse now checks the image's memoryTypeBits for all 32 indices. This is a concrete
+allocator defect; the phone logs do not prove it caused this particular loss.
+
+Android's minimum pool reservation is reduced from 64 MiB to 8 MiB, and VMA's
+preferred large-heap block is 32 MiB rather than its default 256 MiB. Larger
+textures still receive their full requirements. Phones with at most 4 GiB
+physical RAM, or unknown RAM, use one shader compiler worker; existing two/four
+worker limits remain on roomier devices. Texture dimensions, viewport resolution
+and EEVEE features are retained. This reduces reserved-memory overhead and
+compiler concurrency; actual phone peak memory has not been measured.
+
+The new sanitizer fixture compiles production allocator initialization, pool
+allocation/routing, segment acquisition and release against mocked VMA calls.
+It covers all memory-type indices, mixed-type pools with free space, alignment,
+coalescing, bounded Android reservations and full-size larger images. The desktop
+configuration is checked separately. Restoring the index-zero exception is
+rejected by its negative control. Existing Vulkan policy tests cover the new
+worker limits.
+
+Startup logs now identify the APK version and PID. Android exit reports include
+the recorded process version/PID/launch timestamp, exit PID/importance and an
+explicit low_memory_kill field to distinguish older sessions. App identity is
+5030016 / 5.3.0-android.16, with the existing update certificate. Native build and
+phone Shading validation are pending.
+
+References: [Android exit reasons and sampled memory](https://developer.android.com/reference/android/app/ApplicationExitInfo),
+[Vulkan memory-type bits](https://docs.vulkan.org/refpages/latest/refpages/source/VkMemoryRequirements.html),
+[VMA allocation block configuration](https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/struct_vma_allocator_create_info.html).

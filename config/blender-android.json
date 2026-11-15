@@ -15,8 +15,8 @@
   "vulkan_headers_version": "1.4.341",
   "android_min_api": 31,
   "configuration": "full",
-  "port_revision": 15,
-  "status": "revision15-submission-waiter-lifetime-fix-native-ci-validated-device-runtime-unverified",
+  "port_revision": 16,
+  "status": "revision16-shading-memory-fix-native-build-pending",
   "additional_patches": [
     {
       "path": "patches/0014-blender-5.3-build-fixes.patch",
@@ -33,6 +33,10 @@
     {
       "path": "patches/0017-android-submission-waiter-lifetime.patch",
       "sha256": "70c2170a22e62f804f59cd0a439e17ea92007fc8ed914723aa671a77490163e3"
+    },
+    {
+      "path": "patches/0018-android-shading-memory.patch",
+      "sha256": "38cb49607a6f1a08be40c1e32b6bc74f853b0f51fe443750b0f36e5c54d9e810"
     }
   ],
   "host_libraries_commit": "e92f1a54a92c774fbeb0cf51c4652bc510d9a50a",

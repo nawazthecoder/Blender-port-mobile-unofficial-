@@ -75,8 +75,10 @@ int main()
   assert(!vk_pipeline_cache_size_valid(VK_PIPELINE_CACHE_MAX_BYTES + 1, 56,
                                        VK_PIPELINE_CACHE_MAX_BYTES + 1 - 56));
   assert(vk_pipeline_cache_size_valid(120, 56, 64));
-  assert(vk_android_shader_compile_workers(8, 4ull << 30) == 2);
-  assert(vk_android_shader_compile_workers(8, 0) == 2);
+  assert(vk_android_shader_compile_workers(8, 4ull << 30) == 1);
+  assert(vk_android_shader_compile_workers(8, 0) == 1);
+  assert(vk_android_shader_compile_workers(8, 5ull << 30) == 2);
+  assert(vk_android_shader_compile_workers(8, 6ull << 30) == 4);
   assert(vk_android_shader_compile_workers(8, 8ull << 30) == 4);
   assert(vk_android_shader_compile_workers(1, 4ull << 30) == 1);
   assert(vk_android_shader_compile_workers(0, 4ull << 30) == 1);

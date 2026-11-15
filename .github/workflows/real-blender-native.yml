@@ -133,6 +133,10 @@ jobs:
         run: >-
           python3 user-repo/tests/android_framebuffer_lifetime_smoke.py blender-source
           --vulkan-include blender_build_android/lib/vulkan_headers/include
+      - name: Check Android GPU memory routing and allocation pressure
+        run: |
+          python3 user-repo/tests/android_gpu_memory_smoke.py blender-source --vulkan-include blender_build_android/lib/vulkan_headers/include
+          python3 user-repo/tests/android_gpu_memory_smoke.py blender-source --vulkan-include blender_build_android/lib/vulkan_headers/include --negative-control
       - name: Check submission waiter lifetime and regression control
         run: |
           python3 user-repo/tests/android_submission_lifetime_smoke.py blender-source --vulkan-include blender_build_android/lib/vulkan_headers/include
@@ -189,7 +193,7 @@ jobs:
           from pathlib import Path
           identity = Path('artifacts/apk-identity.txt').read_text()
           assert "package: name='org.blender.androidport'" in identity, identity[:500]
-          assert "versionCode='5030015'" in identity, identity[:500]
+          assert "versionCode='5030016'" in identity, identity[:500]
           assert "application-label:'Blender Android'" in identity, identity[:500]
           PYCODE
           "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --print-certs artifacts/blender-5.3.0-android-full.apk > artifacts/signing-certificate.txt
