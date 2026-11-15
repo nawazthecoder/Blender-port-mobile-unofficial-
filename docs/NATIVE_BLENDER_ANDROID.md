@@ -6,9 +6,11 @@ and [build history](PORT_PROGRESS.md). The user confirms revision 15 fixed the
 destroyed-mutex startup crash; entering Shading still fails. Its new log reports
 Vulkan device loss and its exit report records a low-memory kill.
 Revision 16 corrects texture-pool memory-type compatibility and reduces Android
-allocation reserves and compiler concurrency. Local regression fixtures pass;
-the native build and a phone retest are pending. The app package and signing
-identity are retained.
+allocation reserves and compiler concurrency. Regression fixtures and full
+native build/package/signature checks pass in
+[workflow 43699738130](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43699738130).
+The downloaded APK and corresponding source were verified. A phone Shading
+retest is pending. The app package and signing identity are retained.
 
 Use the full native editor workflow, which compiles libblender.so and packages
 the real Python/scripts/assets payload. It does not use the historical diagnostic

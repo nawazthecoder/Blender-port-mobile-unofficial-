@@ -10,13 +10,13 @@ The existing Android integration branch/PR is retained so the established
 signing-key and build caches remain available. Its historical branch name still
 contains 5.2.3; the source lock and native workflow determine the actual release.
 
-The current port is revision 15, APK 5030015 / 5.3.0-android.15. It fixes a
-duplicated Vulkan submission completion that could lock a destroyed stack-owned
-mutex. Full native build and APK checks passed in
-[workflow 43695064739](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43695064739).
-It retains revision 14's framebuffer-retirement fix. The user reported that
-revision 14 resolved lag before launch, but still crashed shortly afterward;
-the supplied logs led to the revision 15 fix. Its phone retest is pending.
+The current port is revision 16, APK 5030016 / 5.3.0-android.16. It fixes an
+invalid Vulkan texture-pool memory-type check and reduces Android allocation
+reserves and low-RAM shader compiler concurrency. Full native build and APK
+checks passed in [workflow 43699738130](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43699738130).
+The user confirms revision 15 fixed the startup destroyed-mutex failure.
+Revision 16 targets the remaining Shading device-loss/low-memory report; its
+phone retest is pending. The framebuffer and waiter lifetime fixes are retained.
 See [build history](PORT_PROGRESS.md) and [graphics stability](GRAPHICS_STABILITY.md).
 
 ## Changes
@@ -44,24 +44,26 @@ See [build history](PORT_PROGRESS.md) and [graphics stability](GRAPHICS_STABILIT
 - KTX's glTF native bridge and OpenTimelineIO Python bindings are included in the
   runtime payload and native dependency collection. Desktop Cycles GPU backends,
   DLSS, OSL and OpenXR remain disabled as in the mobile configuration.
-- APK identity is org.blender.androidport, 5030015 / 5.3.0-android.15. Native runtime
+- APK identity is org.blender.androidport, 5030016 / 5.3.0-android.16. Native runtime
   resources use the 5.3 directory. CI retains the existing certificate fingerprint
   guard before releasing an APK.
 
 ## Validation
 
-All five patches apply cleanly to a fresh exact stable checkout without altering
+All six patches apply cleanly to a fresh exact stable checkout without altering
 its version header. The 23 package/preparation/recovery tests, native collection
-fixture and mouse/Vulkan/framebuffer/submission sanitizer fixtures pass locally
-and in CI. The submission regression control rejects early waiter completion.
+fixture and mouse/Vulkan/framebuffer/submission/memory sanitizer fixtures pass
+locally and in CI. Regression controls reject early waiter completion and
+incompatible memory-type-zero reuse. The memory fixture checks Android and
+desktop settings, all 32 types, segment reuse and full-size larger images.
 Local LeakSanitizer is disabled because the executor uses ptrace;
 address/undefined sanitizers stay enabled. Full native ARM64 compilation, codec
 bridges, runtime/ELF audit, package identity and update-signing checks passed in
-[workflow 43695064739](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43695064739).
+[workflow 43699738130](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43699738130).
 The APK contains 155 native libraries and keeps the established signing identity.
 Downloaded ZIP/APK hashes, source locks and corresponding source patch were
-verified against implementation `f7c0c2aaa4701b38c501c2fb2b3eb7f3eeb6597f`
-and provenance merge `d0494fca251fd2b4ac1e7453f3045087b2f40779`.
+verified against implementation `83390844c4740e4e869791aee188f3f9e792799b`
+and provenance merge `cdb1c57a0a090cc0cebf2a41693c910e2870e0b0`.
 
 The native build also validated the required 5.3 API adaptations: explicit Volk
 loader callbacks for Android VMA, typed popup list access, the virtual keyboard's

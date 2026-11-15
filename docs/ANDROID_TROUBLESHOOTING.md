@@ -7,9 +7,26 @@ after a startup log reported `pthread_mutex_lock called on a destroyed mutex`.
 The first notification could let the caller destroy its stack-owned wait state;
 the second then tried to lock it. The worker now signals once after cleanup.
 The production-code regression fixture and native build/package checks pass.
-Install revision 15 over revision 14 and retest launch; phone resolution remains
-unverified until that test. If it still exits, reopen once to export the new
-startup/previous-session log and exit report for the exact new revision.
+The user confirms revision 15 fixed this startup failure. The fix remains in
+revision 16.
+
+## Shading device loss and a low-memory exit report
+
+Revision 16 targets the remaining Shading failure reported with
+`VK_ERROR_DEVICE_LOST` and Android exit reason 3 (`REASON_LOW_MEMORY`). It fixes
+texture-pool reuse of incompatible memory type zero, reduces Android allocation
+reserves and limits shader compilation to one worker on phones with at most
+4 GiB physical RAM. Larger textures and the viewport retain their dimensions.
+Native build/package checks and allocator regressions pass; the phone Shading
+outcome is still unverified. Install over revision 15 and test the default cube
+in Shading first.
+
+If it still closes, reopen once and supply the new startup/previous-session log
+and exit report. Revision 16 logs include the APK version and PID, and its exit
+report includes recorded process identity and a low-memory flag. A previous log
+may describe an older session. PSS/RSS in Android exit reports are last system
+samples, not peak memory immediately before death. See
+[Android's exit-report reference](https://developer.android.com/reference/android/app/ApplicationExitInfo).
 
 ## A Vulkan/OpenGL fallback message while Blender is drawing
 

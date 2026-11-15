@@ -558,3 +558,31 @@ phone Shading validation are pending.
 References: [Android exit reasons and sampled memory](https://developer.android.com/reference/android/app/ApplicationExitInfo),
 [Vulkan memory-type bits](https://docs.vulkan.org/refpages/latest/refpages/source/VkMemoryRequirements.html),
 [VMA allocation block configuration](https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/struct_vma_allocator_create_info.html).
+
+### Revision 16 — native build and APK validation passed
+
+- Implementation `83390844c4740e4e869791aee188f3f9e792799b` passed
+  [workflow 43699738130](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43699738130),
+  job 132768033608. This includes all 23 unit tests, existing sanitizer fixtures,
+  the Android/desktop memory fixture and its negative control, native editor
+  compilation, runtime/ARM64 dependency audit, package identity, APK v3 signing
+  and matching-update-certificate checks.
+- Artifact `14156057697`, `blender-5.3.0-android-full-arm64`, expires 2026-11-29.
+  ZIP size 289,625,168 bytes; SHA256
+  `d769e0756f54bc28e22c492ddb6d5ece42831afd697a1764a84c8b3ed68b3050`.
+- APK `blender-5.3.0-android.16-arm64.apk`, 291,768,528 bytes, 155 ARM64 native
+  libraries, versionCode 5030016, versionName 5.3.0-android.16, package
+  org.blender.androidport. APK SHA256
+  `528bcbf25b6b900cddc610cab44d778285b39a5a2cf26e305196006c000cb64c`.
+  Certificate SHA256 remains
+  `45971c45d2531454994f4382a402bdb3a491159cbee356a8a0effd831c76ab3e`.
+- Downloaded ZIP/APK hashes, API 31/34 identity, six source-patch hashes,
+  corresponding source patch and provenance merge
+  `cdb1c57a0a090cc0cebf2a41693c910e2870e0b0` were verified. The exact source
+  remains official 5.3.0 at `02f0899d78e374b63e7181d9061e1f7ab03419cc` with
+  Android patches applied. Larger-image allocation and the desktop reservation
+  policy pass the production-code regression fixture.
+- The updated APK is available to install over revision 15. The user's startup
+  fix is confirmed; revision 16's Shading stability and actual phone peak memory
+  are unverified. This final status checkpoint changes no engine patches or APK
+  contents.
