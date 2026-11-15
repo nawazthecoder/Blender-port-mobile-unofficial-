@@ -2,8 +2,23 @@
 
 ## Revision 14 — Blender 5.3 presentation cleanup
 
-The user reports lag and an exit after a few seconds with 5.3.0 revision 13.
-No device report has been supplied yet, so a specific phone crash cause is not
+### Phone feedback — 2026-11-15
+
+The user reports that lag before launch is fixed, but revision 14 still crashes
+a few seconds after launching. This is a partial improvement, not confirmation
+that the remaining crash is caused by or fixed by framebuffer retirement. No
+current exit report has been supplied. The only located startup log is dated
+2026-10-31 and uses org.blender.blender; it is not evidence for the current
+org.blender.androidport revision 14 failure.
+
+The shipped revision 14 still exports the previous session log and Android
+process-exit report. Reopen once, then collect blender-last-exit.txt and
+blender-previous.log from Downloads, or the alternate log path shown at launch.
+A current report is needed before selecting further device-specific changes.
+No new APK or unverified graphics workaround is introduced by this status update.
+
+The initial report described lag and an exit after a few seconds with revision 13.
+No current device report has been supplied, so the remaining crash cause is not
 confirmed. Investigation found a concrete error in the 5.3 resource migration:
 completed swapchain resources destroyed their registered image views without
 evicting the classic-render-pass framebuffers referencing those views. This left

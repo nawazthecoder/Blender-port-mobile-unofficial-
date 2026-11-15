@@ -435,3 +435,14 @@ Its device tests are not evidence that this APK works on the user's Mali phone.
 - Phone lag/crash resolution is not yet confirmed. The user has not provided
   the process-exit report or previous-session log. Retest revision 14, and if it
   still exits, reopen once and supply those reports before attributing a cause.
+
+### Revision 14 — phone feedback, 2026-11-15
+
+The user confirms lag before launch is fixed, but the app still crashes a few
+seconds after launch. The crash remains unresolved despite passing native build
+and package checks. The report-export code is present in the locked source and
+unmodified by subsequent patches. The only available historical startup log is
+from 2026-10-31 and a different package, so it cannot identify this failure.
+Current blender-last-exit.txt and blender-previous.log are needed to distinguish
+a native fault, an unresponsive process or a system-initiated process death.
+This checkpoint records feedback; it does not change the APK or its source patches.

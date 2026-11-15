@@ -7,8 +7,9 @@ Not affiliated with the Blender Foundation.
 **Status: revision 14 full native ARM64 build and APK validation passed in
 [workflow 43570439821](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43570439821).**
 It fixes a confirmed presentation-resource cleanup gap found after the user's
-revision 13 lag/crash report. Another phone test is still required to establish
-whether it resolves that incident. See [graphics stability](docs/GRAPHICS_STABILITY.md).
+revision 13 lag/crash report. Phone feedback on 2026-11-15 confirms the launch
+lag is gone, but the app still exits a few seconds after launch. The remaining
+startup crash is unresolved; a current process-exit report is needed. See [graphics stability](docs/GRAPHICS_STABILITY.md).
 Download the `blender-5.3.0-android-full-arm64` artifact from the successful run.
 
 The new source lock uses official tag `v5.3.0`, commit
