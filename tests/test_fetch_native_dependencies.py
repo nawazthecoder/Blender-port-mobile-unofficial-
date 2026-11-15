@@ -18,6 +18,7 @@ class RuntimeFetchTests(unittest.TestCase):
         for path in ('assets/brushes/brush.blend', 'release/datafiles/font.woff2',
                      'scripts/startup/bl_app_templates_system/Storyboarding/startup.blend',
                      'scripts/startup/bl_app_templates_system/2D_Animation/startup.blend',
+                     'release/windows/desktop.png',
                      'tests/data/large.blend'):
             file = self.root / path
             file.parent.mkdir(parents=True, exist_ok=True)
@@ -59,6 +60,7 @@ if args[:2] == ['lfs', 'pull']:
             asset = self.root / 'scripts/startup/bl_app_templates_system' / path / 'startup.blend'
             self.assertEqual(asset.read_bytes(), b'materialized runtime asset')
         self.assertEqual((self.root / 'tests/data/large.blend').read_bytes(), POINTER)
+        self.assertEqual((self.root / 'release/windows/desktop.png').read_bytes(), POINTER)
         self.assertIn('Runtime source payloads verified', result.stdout)
 
     def test_missing_template_payload_fails_before_compilation(self):

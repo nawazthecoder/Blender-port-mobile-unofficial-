@@ -8,7 +8,7 @@ git config --local credential.https://projects.blender.org.helper '!f() { echo u
 # Match every source directory copied into the APK runtime, including the .blend
 # startup files shipped with application templates under scripts/.
 # Test fixtures are not part of the editor and consume several GB.
-git lfs pull --include='assets/**,release/**,scripts/**,locale/**' --exclude='tests/**'
+git lfs pull --include='assets/**,release/datafiles/**,scripts/**,locale/**' --exclude='tests/**'
 python3 - <<'PY'
 from pathlib import Path
 pointer = b'version https://git-lfs.github.com/spec/v1'

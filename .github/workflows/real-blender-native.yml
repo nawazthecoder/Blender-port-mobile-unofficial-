@@ -18,6 +18,7 @@ on:
       - 'scripts/check_android_apk.py'
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: blender-stable-android-${{ github.ref }}
   # Preserve expensive compiler work while newer checkpoints queue.
@@ -92,10 +93,29 @@ jobs:
           path: ccache
           key: android-ccache-r30-${{ github.sha }}
           restore-keys: android-ccache-r30-
+      - name: Restore locked runtime source assets
+        id: runtime-lfs-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: blender-source/.git/lfs/objects
+          key: blender-runtime-lfs-5.3.0-02f0899d78e3-v1
       - name: Fetch real host and target libraries, including LFS payloads
         id: dependencies
         working-directory: blender-source
-        run: bash ../user-repo/scripts/fetch_native_dependencies.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! bash ../user-repo/scripts/fetch_native_dependencies.sh; then
+            # Revision 14 used the same official source. Recover only assets whose
+            # bytes match its Git LFS OIDs, never any previous native libraries.
+            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/14104199144/zip" > ../validated-assets.zip
+            python3 ../user-repo/scripts/restore_runtime_lfs_assets.py . \
+              --artifact ../validated-assets.zip \
+              --artifact-sha256 d155e26a1983146d7113c8fe1345ea26b43030607559aeda34441f8153efff1e
+            rm ../validated-assets.zip
+            bash ../user-repo/scripts/fetch_native_dependencies.sh
+          fi
       - name: Install matching Vulkan headers
         run: |
           curl -fL --retry 3 \
@@ -205,6 +225,12 @@ jobs:
             blender-source/lib/android_arm64
             blender-source/.git/modules/lib
           key: android-libs-5.3.0-e92f1a54-59001bef-v1
+      - name: Save verified runtime source assets
+        if: always() && steps.dependencies.outcome == 'success' && steps.runtime-lfs-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: blender-source/.git/lfs/objects
+          key: blender-runtime-lfs-5.3.0-02f0899d78e3-v1
       - name: Save denoiser downloads and build progress
         if: always() && steps.compile.outcome != 'skipped' && steps.oidn-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4

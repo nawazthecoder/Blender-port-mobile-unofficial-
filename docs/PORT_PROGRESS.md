@@ -467,3 +467,23 @@ Normal execution passes with ASan/UBSan. Restoring the early notification is
 rejected by the negative control before invalid reuse. Existing local tests
 pass. Native build and the next phone test are pending. App version is
 5030015 / 5.3.0-android.15; official engine metadata remains unchanged.
+
+### Revision 15 — source asset download recovery
+
+The first native run, [43693816827](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43693816827),
+stopped before compilation: Blender's public source LFS endpoint returned an
+authorization error. The host/target library caches restored successfully.
+The runtime source LFS object store now has its own release-pinned cache.
+If dependency fetching fails, the workflow can recover runtime source assets
+from the checksum-pinned, previously validated revision 14 artifact (14104199144,
+expires 2026-11-28), built from the same official source commit. Each recovered
+object must match its official source LFS SHA-256 and size before entering the
+object cache; all required objects must be present. The normal strict dependency
+fetch and validation then run again. No previous native binaries are reused.
+
+The include list now covers release/datafiles rather than unrelated Windows/macOS
+packaging assets. Tests reject incorrect hashes, missing assets, corrupt cache
+entries and source mismatches. Local recovery verifies all 208 distinct runtime
+objects (219 paths), followed by checkout with the network endpoint disabled.
+All 23 unit tests pass. This repairs build input availability; the mutex fix
+still requires native compilation and the user's next phone test.
