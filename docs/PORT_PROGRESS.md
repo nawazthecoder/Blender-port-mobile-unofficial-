@@ -446,3 +446,24 @@ from 2026-10-31 and a different package, so it cannot identify this failure.
 Current blender-last-exit.txt and blender-previous.log are needed to distinguish
 a native fault, an unresponsive process or a system-initiated process death.
 This checkpoint records feedback; it does not change the APK or its source patches.
+
+## Revision 15 — destroyed submission mutex
+
+The user supplied current logs. The startup log explicitly reports a FORTIFY
+abort on locking a destroyed mutex. The exit text describes SwipeUpClean rather
+than that abort, so no low-memory diagnosis is justified from that record.
+
+Inspection of vk_device_submission.cc found the merge had kept both the old
+early completion and upstream 5.3's relocated completion after graph cleanup.
+The first could release the caller's stack-owned wait state before the worker
+locked it for the second. Patch 0017 removes the early completion and documents
+the stack lifetime, restoring the upstream ordering. Resolution, features,
+shader settings, controls and the revision 14 cleanup fix are retained.
+
+A new fixture compiles production caller/wait/task code and the worker tail
+against mock Vulkan calls. A controlled cleanup gate verifies that waiting
+callers cannot return early; device-loss and asynchronous paths are covered.
+Normal execution passes with ASan/UBSan. Restoring the early notification is
+rejected by the negative control before invalid reuse. Existing local tests
+pass. Native build and the next phone test are pending. App version is
+5030015 / 5.3.0-android.15; official engine metadata remains unchanged.

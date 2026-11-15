@@ -1,5 +1,37 @@
 # Android graphics stability
 
+## Revision 15 — submission waiter lifetime
+
+The supplied revision 14 startup log ends with `FORTIFY: pthread_mutex_lock
+called on a destroyed mutex`. The supplied process-exit text instead describes
+`SwipeUpClean` (reason 13); it must not be treated as the native abort's tombstone
+or as evidence of a low-memory termination. Raw user logs are not published here.
+
+Investigation found that the 5.3 port retained the old submission-completion
+notification inside the queue-submit branch as well as upstream 5.3's new
+notification after graph reference release/reset. The first could wake the caller
+of render_graph_submit(), return from that function and destroy its stack-owned
+VKRenderGraphWait. The worker then attempted the second notification through the
+expired pointer, locking a destroyed mutex. The earlier notification was a merge
+error; upstream 5.3 deliberately moved completion after resource cleanup.
+
+Patch 0017 removes the early notification. Completion is sent exactly once,
+after graph references are released and reset, while holding the wait mutex.
+The caller therefore cannot destroy the wait state until notification is done.
+Device-loss draining and asynchronous submission behavior are retained.
+
+The new ASan/UBSan fixture compiles the actual caller, wait/task structures and
+worker tail with mock Vulkan/resource operations. A controlled cleanup gate
+checks waiter lifetime, device-loss handling and nonblocking submission. A
+negative control restoring the early notification fails before the worker can
+access the expired waiter again. Other package, input, framebuffer and Vulkan
+regressions pass locally. These tests establish the code race and its correction;
+the new APK still requires another phone test.
+
+Revision 15 stays Blender 5.3.0, versionCode 5030015 and versionName
+5.3.0-android.15. Native compilation/package checks are pending. The package,
+certificate, resolution, shader cache policy and controls remain the same.
+
 ## Revision 14 — Blender 5.3 presentation cleanup
 
 ### Phone feedback — 2026-11-15

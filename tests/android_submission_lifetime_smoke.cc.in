@@ -1,0 +1,163 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#include <vulkan/vulkan.h>
+#include <atomic>
+#include <cassert>
+#include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <future>
+#include <iostream>
+#include <mutex>
+#include <optional>
+#include <thread>
+#include <utility>
+#include <vector>
+using namespace std::chrono_literals;
+namespace blender::gpu {
+using Mutex = std::mutex;
+using TimelineValue = uint64_t;
+template<class T> using Vector = std::vector<T>;
+struct State {
+  std::mutex mutex;
+  std::condition_variable condition;
+  bool at_cleanup = false, allow_cleanup = false;
+  std::atomic<bool> released = false, discarded = false, reset = false;
+  std::atomic<bool> returned_after_cleanup = false;
+  std::atomic<int> submissions = 0;
+  VkResult submit_result = VK_SUCCESS;
+};
+namespace render_graph {
+struct VKResourceStateTracker { struct DiscardableResource {}; };
+struct VKRenderGraph {
+  State &state;
+  void deref_resources() {
+    std::unique_lock lock(state.mutex);
+    state.at_cleanup = true;
+    state.condition.notify_all();
+    state.condition.wait(lock, [&] { return state.allow_cleanup; });
+    state.released = true;
+  }
+  void reset() { assert(state.released && state.discarded); state.reset = true; }
+};
+}
+@WAIT_TYPE@
+@TASK_TYPE@
+struct Queue {
+  std::mutex mutex;
+  std::condition_variable condition;
+  std::deque<void *> items;
+  void *pop() {
+    std::unique_lock lock(mutex);
+    condition.wait(lock, [&] { return !items.empty(); });
+    auto p = items.front(); items.pop_front(); return p;
+  }
+};
+constexpr int BLI_THREAD_QUEUE_WORK_PRIORITY_NORMAL = 0;
+template<class T> void BLI_thread_queue_push(Queue *queue, T *p, int) {
+  std::lock_guard lock(queue->mutex); queue->items.push_back(p); queue->condition.notify_one();
+}
+template<class T> T *MEM_new(const char *) { return new T{}; }
+template<class T> void MEM_delete(T *p) { delete p; }
+struct VKDiscardPool {
+  std::mutex mutex;
+  uint64_t timeline_ = 0;
+  State *state = nullptr;
+  auto &mutex_get() { return mutex; }
+  void move_data(VKDiscardPool &, uint64_t) {}
+  void discard_resources(const Vector<render_graph::VKResourceStateTracker::DiscardableResource> &,
+                         uint64_t) {
+    assert(state->released); state->discarded = true;
+  }
+};
+struct MockFunctions {
+  State &state;
+  VkResult vkQueueSubmit(VkQueue, uint32_t, const VkSubmitInfo *, VkFence) {
+    state.submissions++; return state.submit_result;
+  }
+};
+struct MockResources {
+  auto pop_discardable_resources() {
+    return Vector<render_graph::VKResourceStateTracker::DiscardableResource>{};
+  }
+};
+struct VKDevice {
+  State &state;
+  Queue submitted, unused;
+  Queue *submitted_render_graphs_ = &submitted, *unused_render_graphs_ = &unused;
+  VKDiscardPool orphaned_data;
+  uint64_t timeline_value_ = 0;
+  VkSemaphore vk_timeline_semaphore_ = VK_NULL_HANDLE;
+  VkQueue vk_queue_ = VK_NULL_HANDLE;
+  std::mutex queue_mutex;
+  std::mutex *queue_mutex_ = &queue_mutex;
+  std::atomic<bool> device_lost_ = false;
+  MockFunctions functions;
+  MockResources resources;
+  explicit VKDevice(State &s) : state(s), functions{s} { orphaned_data.state = &s; }
+  bool is_device_lost() const { return device_lost_; }
+  uint64_t submission_finished_timeline_get() const { return 0; }
+  void wait_for_timeline(uint64_t) { assert(false && "unexpected completion wait in fixture"); }
+  TimelineValue render_graph_submit(render_graph::VKRenderGraph *, VKDiscardPool &, bool, bool,
+      bool, VkPipelineStageFlags, VkSemaphore, VkSemaphore, VkFence);
+};
+void vk_submit_log(const char *, ...) {}
+#define VKSUBLOG(...) vk_submit_log(__VA_ARGS__)
+#define CLOG_TRACE(...) ((void)0)
+#define CLOG_ERROR(...) ((void)0)
+struct CommandBuffer { void end_recording() {} };
+struct CommandBuffers {
+  void append_timeline(uint64_t, VkCommandBuffer) {}
+};
+@CALLER@
+static void process_task(VKDevice *device, VKRenderGraphSubmitTask *submit_task) {
+  std::optional<CommandBuffer> command_buffer(std::in_place);
+  VkCommandBuffer vk_command_buffer = VK_NULL_HANDLE;
+  uint64_t num_nodes = 1;
+  CommandBuffers command_buffers_in_use;
+  auto &render_graph = *submit_task->render_graph;
+@WORKER@
+}
+static void check(bool wait_for_submission, bool lost) {
+  State state;
+  VKDevice device(state);
+  device.device_lost_ = lost;
+  VKDiscardPool context;
+  render_graph::VKRenderGraph graph{state};
+  std::thread worker([&] {
+    process_task(&device, static_cast<VKRenderGraphSubmitTask *>(device.submitted.pop()));
+  });
+  auto caller = std::async(std::launch::async, [&] {
+    auto timeline = device.render_graph_submit(&graph, context, true, wait_for_submission,
+                                             false, 0, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                             VK_NULL_HANDLE);
+    state.returned_after_cleanup = state.released && state.discarded && state.reset;
+    return timeline;
+  });
+  {
+    std::unique_lock lock(state.mutex);
+    assert(state.condition.wait_for(lock, 5s, [&] { return state.at_cleanup; }));
+  }
+  if (wait_for_submission) {
+    const bool completion_precedes_cleanup = caller.wait_for(1s) != std::future_status::timeout;
+    assert(!completion_precedes_cleanup);
+  }
+  else {
+    assert(caller.wait_for(5s) == std::future_status::ready);
+  }
+  {
+    std::lock_guard lock(state.mutex); state.allow_cleanup = true;
+  }
+  state.condition.notify_all();
+  assert(caller.get() == 1);
+  worker.join();
+  assert(state.released && state.discarded && state.reset);
+  if (wait_for_submission) assert(state.returned_after_cleanup);
+  assert(state.submissions == (lost ? 0 : 1));
+}
+int run() {
+  check(true, false); check(true, true); check(false, false);
+  std::cout << "Submission lifetime PASS: waiter survives cleanup, device loss, asynchronous submit\n";
+  return 0;
+}
+}
+int main() { return blender::gpu::run(); }

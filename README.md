@@ -4,13 +4,12 @@ Android ARM64 port of the official **Blender 5.3.0 stable** source, using the
 unofficial simfeo Android backend and the phone controls/fixes developed here.
 Not affiliated with the Blender Foundation.
 
-**Status: revision 14 full native ARM64 build and APK validation passed in
-[workflow 43570439821](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43570439821).**
-It fixes a confirmed presentation-resource cleanup gap found after the user's
-revision 13 lag/crash report. Phone feedback on 2026-11-15 confirms the launch
-lag is gone, but the app still exits a few seconds after launch. The remaining
-startup crash is unresolved; a current process-exit report is needed. See [graphics stability](docs/GRAPHICS_STABILITY.md).
-Download the `blender-5.3.0-android-full-arm64` artifact from the successful run.
+**Status: revision 15 fixes a reproduced submission-waiter lifetime race and is
+awaiting native build/package validation.** The phone log reports a destroyed
+mutex after startup. The 5.3 merge had retained two completion notifications;
+the first could let the caller destroy its wait state before the second used it.
+See [graphics stability](docs/GRAPHICS_STABILITY.md) for the fix and test limits.
+Revision 14's launch lag improved, but its startup crash persisted.
 
 The new source lock uses official tag `v5.3.0`, commit
 `02f0899d78e374b63e7181d9061e1f7ab03419cc`. Blender's release/file-format metadata
@@ -55,8 +54,8 @@ Linux x86-64 build host. The generated APK targets Android ARM64.
 
 ## Installation and verification
 
-The package stays **Blender Android** (`org.blender.androidport`). Revision 14
-uses versionCode **5030014** and versionName **5.3.0-android.14**. CI checks the
+The package stays **Blender Android** (`org.blender.androidport`). Revision 15
+uses versionCode **5030015** and versionName **5.3.0-android.15**. CI checks the
 same signing certificate as revisions 9–12, so an unrelated key cannot silently
 produce an incompatible update. Save projects before installing an update.
 
