@@ -16,7 +16,7 @@
   "android_min_api": 31,
   "configuration": "full",
   "port_revision": 15,
-  "status": "revision15-submission-waiter-lifetime-fix-native-build-pending",
+  "status": "revision15-submission-waiter-lifetime-fix-native-ci-validated-device-runtime-unverified",
   "additional_patches": [
     {
       "path": "patches/0014-blender-5.3-build-fixes.patch",

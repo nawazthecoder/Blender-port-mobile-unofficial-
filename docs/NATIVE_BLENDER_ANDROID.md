@@ -4,8 +4,10 @@ The current target is official Blender **5.3.0 stable**, port revision **15**.
 See [upgrade details](UPGRADE_5_3.md), the exact [source lock](../config/blender-android.json)
 and [build history](PORT_PROGRESS.md). Revision 15 fixes duplicate submission
 completion that could access a caller's destroyed wait mutex after startup.
-Local regression fixtures pass; the native build and another phone test are
-pending. Revision 14's lag improved, but the user's startup crash persisted.
+Local regression fixtures and the full native build/package/signature checks
+pass in [workflow 43695064739](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43695064739).
+The downloaded APK, source patch and provenance were verified. Another phone
+test is pending. Revision 14's lag improved, but its startup crash persisted.
 The app package and signing identity are retained.
 
 Use the full native editor workflow, which compiles libblender.so and packages

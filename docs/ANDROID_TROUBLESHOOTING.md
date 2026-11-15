@@ -1,5 +1,16 @@
 # Android graphics and texture painting
 
+## Destroyed-mutex error shortly after launch
+
+Revision 15 fixes a duplicate Vulkan submission-completion notification found
+after a startup log reported `pthread_mutex_lock called on a destroyed mutex`.
+The first notification could let the caller destroy its stack-owned wait state;
+the second then tried to lock it. The worker now signals once after cleanup.
+The production-code regression fixture and native build/package checks pass.
+Install revision 15 over revision 14 and retest launch; phone resolution remains
+unverified until that test. If it still exits, reopen once to export the new
+startup/previous-session log and exit report for the exact new revision.
+
 ## A Vulkan/OpenGL fallback message while Blender is drawing
 
 Revision 7 compiles only the Vulkan display backend. A working viewport in that

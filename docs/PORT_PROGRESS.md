@@ -487,3 +487,33 @@ entries and source mismatches. Local recovery verifies all 208 distinct runtime
 objects (219 paths), followed by checkout with the network endpoint disabled.
 All 23 unit tests pass. This repairs build input availability; the mutex fix
 still requires native compilation and the user's next phone test.
+
+### Revision 15 — native build and APK validation passed
+
+- Implementation `f7c0c2aaa4701b38c501c2fb2b3eb7f3eeb6597f` passed
+  [workflow 43695064739](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43695064739),
+  job 132753664448. The production submission-lifetime fixture and its negative
+  control both pass, as do the existing regressions, native compilation,
+  runtime/ARM64 dependency audit, app identity, APK v3 signature and retained
+  update-certificate guard. All 23 unit tests pass.
+- Runtime source fetching passed with the narrowed runtime include list, and
+  cache `blender-runtime-lfs-5.3.0-02f0899d78e3-v1` was saved. The strict recovery
+  path was verified locally against all required source objects; this successful
+  CI run did not need to invoke it.
+- Artifact `14154012925`, `blender-5.3.0-android-full-arm64`, expires 2026-11-29.
+  ZIP size 289,635,813 bytes; SHA256
+  `c25e57aef4a1ce4abcc9921581fa0034fcf3d9a47bd1422f797dfc732079a342`.
+- APK `blender-5.3.0-android.15-arm64.apk`, 291,772,624 bytes, 155 ARM64 native
+  libraries, versionCode 5030015, versionName 5.3.0-android.15, package
+  org.blender.androidport. APK SHA256
+  `5d7ccc02a3e464b056f629c8ca74d04c9a8063fb6427fb92b1c9da95cc6d8fe3`.
+  Certificate SHA256 remains
+  `45971c45d2531454994f4382a402bdb3a491159cbee356a8a0effd831c76ab3e`.
+- Downloaded artifact/APK hashes, API 31/34 identity, all five source-patch hashes
+  and the corresponding source patch were checked. Provenance merge
+  `d0494fca251fd2b4ac1e7453f3045087b2f40779` contains the implementation.
+  The source remains official 5.3.0 at
+  `02f0899d78e374b63e7181d9061e1f7ab03419cc` with Android patches applied.
+- The updated APK is available for installation. Retest startup on the phone;
+  device crash resolution and sustained runtime behavior remain unverified.
+  This status checkpoint changes no engine patches or APK contents.

@@ -10,11 +10,14 @@ The existing Android integration branch/PR is retained so the established
 signing-key and build caches remain available. Its historical branch name still
 contains 5.2.3; the source lock and native workflow determine the actual release.
 
-The initial migration was revision 13. Revision 14 addresses the reported phone
-lag/crash by fixing a framebuffer-retirement gap; its full native build and APK
-checks passed in [workflow 43570439821](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43570439821).
-It retains the same 5.3.0 source pin and uses APK 5030014 / 5.3.0-android.14.
-The exact phone outcome is still unverified. See [graphics stability](GRAPHICS_STABILITY.md).
+The current port is revision 15, APK 5030015 / 5.3.0-android.15. It fixes a
+duplicated Vulkan submission completion that could lock a destroyed stack-owned
+mutex. Full native build and APK checks passed in
+[workflow 43695064739](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43695064739).
+It retains revision 14's framebuffer-retirement fix. The user reported that
+revision 14 resolved lag before launch, but still crashed shortly afterward;
+the supplied logs led to the revision 15 fix. Its phone retest is pending.
+See [build history](PORT_PROGRESS.md) and [graphics stability](GRAPHICS_STABILITY.md).
 
 ## Changes
 
@@ -41,23 +44,24 @@ The exact phone outcome is still unverified. See [graphics stability](GRAPHICS_S
 - KTX's glTF native bridge and OpenTimelineIO Python bindings are included in the
   runtime payload and native dependency collection. Desktop Cycles GPU backends,
   DLSS, OSL and OpenXR remain disabled as in the mobile configuration.
-- APK identity is org.blender.androidport, 5030013 / 5.3.0-android.13. Native runtime
+- APK identity is org.blender.androidport, 5030015 / 5.3.0-android.15. Native runtime
   resources use the 5.3 directory. CI retains the existing certificate fingerprint
   guard before releasing an APK.
 
 ## Validation
 
-The patch applies cleanly to a fresh exact stable checkout without altering its
-version header. The 16 package/preparation tests, virtual-mouse sanitizer fixture,
-Vulkan policy/barrier/acquisition sanitizer fixture and native collection fixture
-pass locally. Local LeakSanitizer is disabled because the executor uses ptrace;
+All five patches apply cleanly to a fresh exact stable checkout without altering
+its version header. The 23 package/preparation/recovery tests, native collection
+fixture and mouse/Vulkan/framebuffer/submission sanitizer fixtures pass locally
+and in CI. The submission regression control rejects early waiter completion.
+Local LeakSanitizer is disabled because the executor uses ptrace;
 address/undefined sanitizers stay enabled. Full native ARM64 compilation, codec
 bridges, runtime/ELF audit, package identity and update-signing checks passed in
-[workflow 43455837164](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43455837164).
+[workflow 43695064739](https://github.com/nawazthecoder/Blender-port-mobile-unofficial-/actions/runs/43695064739).
 The APK contains 155 native libraries and keeps the established signing identity.
-The downloaded ZIP/APK digests, source locks and corresponding source patch were
-verified against the published implementation at
-`61785f324f0fc42bad48e14145f7dd6a83fe068e`.
+Downloaded ZIP/APK hashes, source locks and corresponding source patch were
+verified against implementation `f7c0c2aaa4701b38c501c2fb2b3eb7f3eeb6597f`
+and provenance merge `d0494fca251fd2b4ac1e7453f3045087b2f40779`.
 
 The native build also validated the required 5.3 API adaptations: explicit Volk
 loader callbacks for Android VMA, typed popup list access, the virtual keyboard's
