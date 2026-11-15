@@ -1,0 +1,110 @@
+diff --git a/build_files/android/apk/app/build.gradle b/build_files/android/apk/app/build.gradle
+index de742a8c..6bfa2a5b 100644
+--- a/build_files/android/apk/app/build.gradle
++++ b/build_files/android/apk/app/build.gradle
+@@ -24,8 +24,8 @@ android {
+     applicationId 'org.blender.blender'
+     minSdk 31
+     targetSdk 34
+-    versionCode 5020304
+-    versionName '5.2.3-android.4'
++    versionCode 5020305
++    versionName '5.2.3-android.5'
+     ndk { abiFilters 'arm64-v8a' }
+   }
+ 
+diff --git a/build_files/android/apk/package.sh b/build_files/android/apk/package.sh
+index 3233d8ea..7283f731 100755
+--- a/build_files/android/apk/package.sh
++++ b/build_files/android/apk/package.sh
+@@ -377,7 +377,7 @@ fi
+   "$STAGE/rescompiled/res.zip" \
+   -A "$ASSETS" -0 zip \
+   --min-sdk-version "$ANDROID_API" --target-sdk-version "$ANDROID_TARGET_API" \
+-  --version-code 5020304 --version-name "5.2.3-android.4"
++  --version-code 5020305 --version-name "5.2.3-android.5"
+ 
+ echo "[apk] assembling"
+ cp "$STAGE/base.apk" "$OUT"
+diff --git a/extern/vulkan_memory_allocator/CMakeLists.txt b/extern/vulkan_memory_allocator/CMakeLists.txt
+index bc0380b2..6009cc1d 100644
+--- a/extern/vulkan_memory_allocator/CMakeLists.txt
++++ b/extern/vulkan_memory_allocator/CMakeLists.txt
+@@ -27,3 +27,12 @@ if((CMAKE_C_COMPILER_ID STREQUAL "GNU") OR (CMAKE_C_COMPILER_ID MATCHES "Clang")
+     PUBLIC "-Wno-nullability-completeness"
+   )
+ endif()
++
++if(ANDROID)
++  # Android does not export every core/extension command from libvulkan.so.
++  # Resolve VMA entry points through the instance/device dispatch functions.
++  target_compile_definitions(extern_vulkan_memory_allocator PUBLIC
++    VMA_STATIC_VULKAN_FUNCTIONS=0
++    VMA_DYNAMIC_VULKAN_FUNCTIONS=1
++  )
++endif()
+diff --git a/intern/ghost/intern/GHOST_ContextVK.cc b/intern/ghost/intern/GHOST_ContextVK.cc
+index 4847fe79..e1bbcbfd 100644
+--- a/intern/ghost/intern/GHOST_ContextVK.cc
++++ b/intern/ghost/intern/GHOST_ContextVK.cc
+@@ -36,7 +36,7 @@
+ /* Silence compilation warning on non-windows x64 systems. */
+ #  define VMA_EXTERNAL_MEMORY_WIN32 0
+ #endif
+-/* Function pointers come from volk, and VMA tests this with #if rather than #ifdef. */
++/* Android supplies dynamic-dispatch definitions through the VMA CMake target. */
+ #ifndef VMA_STATIC_VULKAN_FUNCTIONS
+ #  define VMA_STATIC_VULKAN_FUNCTIONS 1
+ #endif
+@@ -331,6 +331,12 @@ class GHOST_DeviceVK {
+     vma_allocator_create_info.physicalDevice = vk_physical_device;
+     vma_allocator_create_info.device = vk_device;
+     vma_allocator_create_info.instance = vk_instance;
++#ifdef __ANDROID__
++    VmaVulkanFunctions vulkan_functions = {};
++    vulkan_functions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
++    vulkan_functions.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
++    vma_allocator_create_info.pVulkanFunctions = &vulkan_functions;
++#endif
+     vma_allocator_create_info.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+     if (extensions.is_enabled(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME)) {
+       vma_allocator_create_info.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_PRIORITY_BIT;
+@@ -1501,9 +1507,18 @@ GHOST_TSuccess GHOST_ContextVK::recreateSwapchain(bool use_hdr_swapchain)
+   VkSurfaceCapabilitiesKHR capabilities = {};
+ 
+   if (device_vk.use_vk_ext_swapchain_maintenance_1) {
+-    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilities2KHR(device_vk.vk_physical_device,
+-                                                        &vk_physical_device_surface_info,
+-                                                        &vk_surface_capabilities),
++    /* Extension entry points must be looked up through their instance, rather
++     * than imported from Android's libvulkan.so. */
++    const auto get_surface_capabilities2 =
++        reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceCapabilities2KHR>(vkGetInstanceProcAddr(
++            instance_vk.vk_instance, "vkGetPhysicalDeviceSurfaceCapabilities2KHR"));
++    if (get_surface_capabilities2 == nullptr) {
++      CLOG_ERROR(&LOG, "Enabled surface capabilities extension has no entry point");
++      return GHOST_kFailure;
++    }
++    VK_CHECK(get_surface_capabilities2(device_vk.vk_physical_device,
++                                      &vk_physical_device_surface_info,
++                                      &vk_surface_capabilities),
+              GHOST_kFailure);
+     capabilities = vk_surface_capabilities.surfaceCapabilities;
+   }
+diff --git a/source/blender/gpu/vulkan/vk_common.hh b/source/blender/gpu/vulkan/vk_common.hh
+index 6f5fea5b..bbe0bb7f 100644
+--- a/source/blender/gpu/vulkan/vk_common.hh
++++ b/source/blender/gpu/vulkan/vk_common.hh
+@@ -20,8 +20,10 @@
+ #endif
+ 
+ #define VMA_VULKAN_VERSION 1002000  // Vulkan 1.2
+-/* Function pointers come from volk, and VMA tests this with #if rather than #ifdef. */
+-#define VMA_STATIC_VULKAN_FUNCTIONS 1
++/* Android supplies dynamic-dispatch definitions through the VMA CMake target. */
++#ifndef VMA_STATIC_VULKAN_FUNCTIONS
++#  define VMA_STATIC_VULKAN_FUNCTIONS 1
++#endif
+ #if !defined(_WIN32) or defined(_M_ARM64)
+ /* Silence compilation warning on non-windows x64 systems. */
+ #  define VMA_EXTERNAL_MEMORY_WIN32 0

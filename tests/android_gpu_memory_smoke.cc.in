@@ -1,0 +1,185 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+#include <algorithm>
+#include <bit>
+#include <cassert>
+#include <cstdint>
+#include <iostream>
+#include <list>
+#include <optional>
+#include <ranges>
+#include <vector>
+#include "vk_mem_alloc.h"
+
+#define BLI_assert(value) assert(value)
+#define BLI_assert_unreachable() assert(false)
+#define UNUSED_VARS_NDEBUG(value) (void)(value)
+#define CLOG_INFO(...) ((void)0)
+constexpr int G_DEBUG_GPU = 1;
+static struct { int debug = 0; } G;
+constexpr VkDeviceSize MiB = 1024 * 1024;
+static std::vector<VkMemoryRequirements> allocation_requests;
+static VmaAllocatorCreateInfo allocator_settings{};
+static uintptr_t next_allocation = 1;
+
+VkResult vmaAllocateMemory(VmaAllocator,
+                          const VkMemoryRequirements *requirements,
+                          const VmaAllocationCreateInfo *settings,
+                          VmaAllocation *allocation,
+                          VmaAllocationInfo *info)
+{
+  assert(settings->memoryTypeBits == requirements->memoryTypeBits);
+  assert(requirements->memoryTypeBits != 0);
+  allocation_requests.push_back(*requirements);
+  *allocation = reinterpret_cast<VmaAllocation>(next_allocation++);
+  *info = {};
+  info->memoryType = std::countr_zero(requirements->memoryTypeBits);
+  info->size = requirements->size;
+  return VK_SUCCESS;
+}
+VkResult vmaCreateAllocator(const VmaAllocatorCreateInfo *settings, VmaAllocator *allocator)
+{
+  allocator_settings = *settings;
+  *allocator = reinterpret_cast<VmaAllocator>(uintptr_t(1));
+  return VK_SUCCESS;
+}
+void vmaImportVulkanFunctionsFromVolk(const VmaAllocatorCreateInfo *, VmaVulkanFunctions *) {}
+namespace volk {
+PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = nullptr;
+PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr = nullptr;
+}
+struct TestGhostDevice {
+  VkPhysicalDevice vk_physical_device = VK_NULL_HANDLE;
+  VkDevice vk_device = VK_NULL_HANDLE;
+  VmaAllocator vma_allocator = nullptr;
+  struct { bool is_enabled(const char *) const { return true; } } extensions;
+  @GHOST_ALLOCATOR@
+};
+struct VKDevice {
+  VmaAllocator mem_allocator_get() const
+  {
+    return reinterpret_cast<VmaAllocator>(uintptr_t(1));
+  }
+};
+struct VKBackend {
+  VKDevice device;
+  static VKBackend &get() { static VKBackend backend; return backend; }
+};
+static VkDeviceSize ceil_to_multiple_ul(VkDeviceSize value, VkDeviceSize alignment)
+{
+  return ((value + alignment - 1) / alignment) * alignment;
+}
+struct VKMemorySegment { VkDeviceSize offset; VkDeviceSize size; };
+struct VKImageInfo { VmaAllocation allocation = nullptr; VKMemorySegment segment{}; };
+template<class T> struct TestSet : std::vector<T> {
+  void add(T value) { this->push_back(value); }
+  void add_overwrite(T value)
+  {
+    for (auto &current : *this) {
+      if (current.allocation == value.allocation) { current = value; return; }
+    }
+    this->push_back(value);
+  }
+};
+class VKTexturePool {
+ public:
+  @CONFIG@
+  struct AllocationHandle {
+    VmaAllocation allocation = nullptr;
+    VmaAllocationInfo allocation_info{};
+    int unused_cycles_count = 0;
+    std::list<VKMemorySegment> segments;
+    void alloc(VkMemoryRequirements requirements);
+    std::optional<VKMemorySegment> acquire(VkMemoryRequirements requirements);
+    void release(VKMemorySegment segment);
+  };
+  TestSet<AllocationHandle> allocations_;
+  VKImageInfo acquire_image(VkMemoryRequirements requirements)
+  {
+    VKImageInfo image_info{};
+    @ROUTING@
+    return image_info;
+  }
+};
+@ALLOC@
+@ACQUIRE@
+@RELEASE@
+
+static VKTexturePool::AllocationHandle manual_handle(uint32_t type)
+{
+  VKTexturePool::AllocationHandle handle;
+  handle.allocation_info.memoryType = type;
+  handle.allocation_info.size = 8192;
+  handle.segments = {{0, 8192}};
+  return handle;
+}
+int main()
+{
+  {
+    auto handle = manual_handle(0);
+    const bool memory_type_zero_must_be_rejected = !handle.acquire({512, 256, 2}).has_value();
+    assert(memory_type_zero_must_be_rejected);
+  }
+  /* Every Vulkan type index, including 0 and 31, obeys the image's supported mask. */
+  for (uint32_t type = 0; type < 32; type++) {
+    auto matching = manual_handle(type);
+    assert(matching.acquire({512, 256, 1u << type}).has_value());
+    auto incompatible = manual_handle(type);
+    assert(!incompatible.acquire({512, 256, ~(1u << type)}).has_value());
+  }
+  {
+    auto handle = manual_handle(0);
+    handle.allocation_info.offset = 128;
+    handle.segments = {{128, 8192}};
+    auto segment = handle.acquire({512, 1024, 1});
+    assert(segment && (segment->offset + 128) % 1024 == 0);
+    handle.release(*segment);
+    assert(handle.segments.size() == 1);
+    assert(handle.segments.front().offset == 128 && handle.segments.front().size == 8192);
+  }
+  TestGhostDevice ghost;
+  ghost.init_memory_allocator(VK_NULL_HANDLE);
+  assert(allocator_settings.flags & VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT);
+  assert(allocator_settings.flags & VMA_ALLOCATOR_CREATE_EXT_MEMORY_PRIORITY_BIT);
+  assert(allocator_settings.flags & VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE4_BIT);
+#ifdef __ANDROID__
+  assert(allocator_settings.preferredLargeHeapBlockSize > 0);
+  assert(allocator_settings.preferredLargeHeapBlockSize <= 32 * MiB);
+  assert(VKTexturePool::allocation_size <= 16 * MiB);
+#else
+  assert(allocator_settings.preferredLargeHeapBlockSize == 0);
+  assert(VKTexturePool::allocation_size == 64 * MiB);
+#endif
+  {
+    allocation_requests.clear();
+    VKTexturePool pool;
+    auto type_zero = pool.acquire_image({MiB, 256, 1});
+    auto type_one = pool.acquire_image({MiB, 256, 2});
+    assert(type_zero.allocation != type_one.allocation);
+    assert(allocation_requests.size() == 2);
+  }
+  {
+    allocation_requests.clear();
+    VKTexturePool pool;
+    auto first = pool.acquire_image({2 * MiB, 256, 1});
+    for (VkDeviceSize i = 1; i < VKTexturePool::allocation_size / (2 * MiB); i++) {
+      auto image = pool.acquire_image({2 * MiB, 256, 1});
+      assert(image.allocation == first.allocation);
+      assert(image.segment.offset == i * 2 * MiB);
+    }
+    assert(allocation_requests.size() == 1);
+    assert(allocation_requests.front().size == VKTexturePool::allocation_size);
+    auto different_type = pool.acquire_image({MiB, 256, 2});
+    assert(different_type.allocation != first.allocation);
+    assert(pool.allocations_.back().allocation_info.memoryType == 1);
+    /* The reservation is a minimum: a larger texture still receives every required byte. */
+    const VkDeviceSize large_size = VKTexturePool::allocation_size + 4 * MiB;
+    auto large = pool.acquire_image({large_size, 4096, 1});
+    assert(large.segment.size == large_size);
+    assert(allocation_requests.back().size == large_size);
+  }
+#ifdef __ANDROID__
+  std::cout << "Android memory PASS: compatible types, bounded reservations, full-size large images\n";
+#else
+  std::cout << "Desktop memory PASS: default allocation policy retained\n";
+#endif
+}

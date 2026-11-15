@@ -1,0 +1,55 @@
+diff --git a/build_files/android/apk/app/build.gradle b/build_files/android/apk/app/build.gradle
+index 7aebcc57..126444d1 100644
+--- a/build_files/android/apk/app/build.gradle
++++ b/build_files/android/apk/app/build.gradle
+@@ -24,8 +24,8 @@ android {
+     applicationId 'org.blender.androidport'
+     minSdk 31
+     targetSdk 34
+-    versionCode 5030014
+-    versionName '5.3.0-android.14'
++    versionCode 5030015
++    versionName '5.3.0-android.15'
+     ndk { abiFilters 'arm64-v8a' }
+   }
+ 
+diff --git a/build_files/android/apk/package.sh b/build_files/android/apk/package.sh
+index 21c7ed28..d5616807 100755
+--- a/build_files/android/apk/package.sh
++++ b/build_files/android/apk/package.sh
+@@ -382,7 +382,7 @@ fi
+   "$STAGE/rescompiled/res.zip" \
+   -A "$ASSETS" -0 zip \
+   --min-sdk-version "$ANDROID_API" --target-sdk-version "$ANDROID_TARGET_API" \
+-  --version-code 5030014 --version-name "5.3.0-android.14"
++  --version-code 5030015 --version-name "5.3.0-android.15"
+ 
+ echo "[apk] assembling"
+ cp "$STAGE/base.apk" "$OUT"
+diff --git a/source/blender/gpu/vulkan/vk_device_submission.cc b/source/blender/gpu/vulkan/vk_device_submission.cc
+index 580861f7..fc73948f 100644
+--- a/source/blender/gpu/vulkan/vk_device_submission.cc
++++ b/source/blender/gpu/vulkan/vk_device_submission.cc
+@@ -353,11 +353,6 @@ void VKDevice::submission_runner(VKDevice *device)
+           }
+         }
+       }
+-      if (submit_task->wait_for_submission != nullptr) {
+-        std::unique_lock<Mutex> lock(submit_task->wait_for_submission->is_submitted_mutex);
+-        submit_task->wait_for_submission->is_submitted = true;
+-        submit_task->wait_for_submission->is_submitted_condition.notify_one();
+-      }
+       command_buffers_in_use.append_timeline(submit_task->timeline, vk_command_buffer);
+       vk_command_buffer = VK_NULL_HANDLE;
+       command_buffer.reset();
+@@ -376,8 +371,8 @@ void VKDevice::submission_runner(VKDevice *device)
+     }
+ 
+     render_graph.reset();
+-    /* Signal only after the graph's resource references are released. Otherwise swapchain images
+-     * aren't dereffed in correct order. */
++    /* Signal exactly once, after the graph's resource references are released. The wait object
++     * lives on the caller's stack and can be destroyed as soon as this lock is released. */
+     if (submit_task->wait_for_submission != nullptr) {
+       std::unique_lock<Mutex> lock(submit_task->wait_for_submission->is_submitted_mutex);
+       submit_task->wait_for_submission->is_submitted = true;

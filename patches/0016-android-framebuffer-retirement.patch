@@ -1,0 +1,209 @@
+diff --git a/build_files/android/apk/app/build.gradle b/build_files/android/apk/app/build.gradle
+index a8faac15..7aebcc57 100644
+--- a/build_files/android/apk/app/build.gradle
++++ b/build_files/android/apk/app/build.gradle
+@@ -24,8 +24,8 @@ android {
+     applicationId 'org.blender.androidport'
+     minSdk 31
+     targetSdk 34
+-    versionCode 5030013
+-    versionName '5.3.0-android.13'
++    versionCode 5030014
++    versionName '5.3.0-android.14'
+     ndk { abiFilters 'arm64-v8a' }
+   }
+ 
+diff --git a/build_files/android/apk/package.sh b/build_files/android/apk/package.sh
+index dd6da5d8..21c7ed28 100755
+--- a/build_files/android/apk/package.sh
++++ b/build_files/android/apk/package.sh
+@@ -382,7 +382,7 @@ fi
+   "$STAGE/rescompiled/res.zip" \
+   -A "$ASSETS" -0 zip \
+   --min-sdk-version "$ANDROID_API" --target-sdk-version "$ANDROID_TARGET_API" \
+-  --version-code 5030013 --version-name "5.3.0-android.13"
++  --version-code 5030014 --version-name "5.3.0-android.14"
+ 
+ echo "[apk] assembling"
+ cp "$STAGE/base.apk" "$OUT"
+diff --git a/source/blender/gpu/vulkan/vk_render_pass_fallback.cc b/source/blender/gpu/vulkan/vk_render_pass_fallback.cc
+index ab9e7773..71cd0058 100644
+--- a/source/blender/gpu/vulkan/vk_render_pass_fallback.cc
++++ b/source/blender/gpu/vulkan/vk_render_pass_fallback.cc
+@@ -14,7 +14,6 @@
+ #include "render_graph/vk_command_buffer_wrapper.hh"
+ #include "vk_backend.hh"
+ #include "vk_device.hh"
+-#include "vk_resource_pool.hh"
+ 
+ #include "BLI_vector.hh"
+ 
+@@ -214,12 +213,11 @@ VkFramebuffer VKRenderPassFallback::framebuffer_get(
+   });
+ }
+ 
+-void VKRenderPassFallback::discard_framebuffers_for_view(VkImageView vk_image_view,
+-                                                         VKDiscardPool &pool,
+-                                                         TimelineValue timeline)
++Vector<VkFramebuffer> VKRenderPassFallback::take_framebuffers_for_view(VkImageView vk_image_view)
+ {
++  Vector<VkFramebuffer> retired;
+   if (vk_device_ == VK_NULL_HANDLE || vk_image_view == VK_NULL_HANDLE) {
+-    return;
++    return retired;
+   }
+   Vector<FramebufferKey> to_remove;
+   {
+@@ -227,7 +225,7 @@ void VKRenderPassFallback::discard_framebuffers_for_view(VkImageView vk_image_vi
+     for (auto item : framebuffers_.items()) {
+       for (uint32_t i = 0; i < item.key.view_count; i++) {
+         if (item.key.views[i] == vk_image_view) {
+-          pool.discard_framebuffer(item.value, timeline);
++          retired.append(item.value);
+           to_remove.append(item.key);
+           break;
+         }
+@@ -237,6 +235,7 @@ void VKRenderPassFallback::discard_framebuffers_for_view(VkImageView vk_image_vi
+       framebuffers_.remove_contained(key);
+     }
+   }
++  return retired;
+ }
+ 
+ void VKRenderPassFallback::deinit()
+diff --git a/source/blender/gpu/vulkan/vk_render_pass_fallback.hh b/source/blender/gpu/vulkan/vk_render_pass_fallback.hh
+index 745da81b..2aa2e17f 100644
+--- a/source/blender/gpu/vulkan/vk_render_pass_fallback.hh
++++ b/source/blender/gpu/vulkan/vk_render_pass_fallback.hh
+@@ -24,13 +24,12 @@
+ 
+ #include "BLI_map.hh"
+ #include "BLI_span.hh"
++#include "BLI_vector.hh"
+ 
+ #include "vk_common.hh"
+ 
+ namespace blender::gpu {
+ 
+-class VKDiscardPool;
+-
+ namespace render_graph {
+ struct VKBeginRenderingData;
+ }
+@@ -111,13 +110,11 @@ class VKRenderPassFallback {
+                                 const render_graph::VKBeginRenderingData &data);
+ 
+   /**
+-   * Retire (into `pool`, deferred to its timeline) any cached framebuffer that
+-   * references `vk_image_view`. Called when a view is discarded so a recycled
+-   * view handle can't match a stale cached framebuffer.
++   * Remove and return cached framebuffers referencing this view, exactly once.
++   * The caller owns their destruction/timeline. Never call into a discard pool
++   * while holding the cache mutex: completed swapchain cleanup holds that pool.
+    */
+-  void discard_framebuffers_for_view(VkImageView vk_image_view,
+-                                     VKDiscardPool &pool,
+-                                     TimelineValue timeline = UINT64_MAX);
++  Vector<VkFramebuffer> take_framebuffers_for_view(VkImageView vk_image_view);
+ 
+   int64_t render_pass_count() const
+   {
+diff --git a/source/blender/gpu/vulkan/vk_resource_pool.cc b/source/blender/gpu/vulkan/vk_resource_pool.cc
+index 8945bc6e..6bd65973 100644
+--- a/source/blender/gpu/vulkan/vk_resource_pool.cc
++++ b/source/blender/gpu/vulkan/vk_resource_pool.cc
+@@ -58,32 +58,18 @@ void VKDiscardPool::discard_image_view(VkImageView vk_image_view)
+   /* Render-pass fallback framebuffers reference image views directly; when a view
+    * is discarded, retire any framebuffer built from it at the same timeline so a
+    * recycled view handle can't resurrect a stale framebuffer (GPU hang). */
+-  VKBackend::get().device.render_pass_fallback.discard_framebuffers_for_view(vk_image_view, *this);
++  Vector<VkFramebuffer> retired =
++      VKBackend::get().device.render_pass_fallback.take_framebuffers_for_view(vk_image_view);
+   std::scoped_lock mutex(mutex_);
++  for (VkFramebuffer framebuffer : retired) {
++    framebuffers_.append_timeline(timeline_, framebuffer);
++  }
+   image_views_.append_timeline(timeline_, vk_image_view);
+ }
+-
+-void VKDiscardPool::discard_framebuffer(VkFramebuffer vk_framebuffer, TimelineValue timeline)
+-{
+-  std::scoped_lock mutex(mutex_);
+-  framebuffers_.append_timeline(timeline == UINT64_MAX ? timeline_ : timeline, vk_framebuffer);
+-}
+-
+-
+ void VKDiscardPool::discard_resources(
+     Span<render_graph::VKResourceStateTracker::DiscardableResource> discardable,
+     TimelineValue timeline)
+ {
+-  /* Batch retirement now owns all views in 5.3. Evict dependent framebuffers
+-   * before taking this pool's lock, because eviction queues into the same pool. */
+-  VKRenderPassFallback &fallback = VKBackend::get().device.render_pass_fallback;
+-  for (const auto &resource : discardable) {
+-    if (resource.type == render_graph::VKResourceType::IMAGE) {
+-      for (const auto &view : resource.views) {
+-        fallback.discard_framebuffers_for_view(std::get<VkImageView>(view), *this, timeline);
+-      }
+-    }
+-  }
+   std::scoped_lock mutex(mutex_);
+   for (const render_graph::VKResourceStateTracker::DiscardableResource &discardable_resource :
+        discardable)
+@@ -98,7 +84,13 @@ void VKDiscardPool::discard_resources(
+                          return entry.second.first == discardable_resource.handle;
+                        }) == images_.end());
+       for (const std::variant<VkImageView, VkBufferView> &view : discardable_resource.views) {
+-        image_views_.append_timeline(timeline, std::get<VkImageView>(view));
++        const VkImageView image_view = std::get<VkImageView>(view);
++        for (VkFramebuffer framebuffer :
++             VKBackend::get().device.render_pass_fallback.take_framebuffers_for_view(image_view))
++        {
++          framebuffers_.append_timeline(timeline, framebuffer);
++        }
++        image_views_.append_timeline(timeline, image_view);
+       }
+       images_.append_timeline(
+           timeline, std::pair(discardable_resource.handle, discardable_resource.allocation));
+@@ -166,17 +158,24 @@ void VKDiscardPool::destroy_discarded_resources(VKDevice &device, TimelineValue
+     for (const std::variant<VkImageView, VkBufferView> &view :
+          device.resources.take_views(image_handle))
+     {
+-      device.functions.vkDestroyImageView(
+-          device.vk_handle(), std::get<VkImageView>(view), nullptr);
++      const VkImageView image_view = std::get<VkImageView>(view);
++      /* This presentation timeline is complete. Detach and destroy cached
++       * framebuffers before their views, without re-entering the pool mutex. */
++      for (VkFramebuffer framebuffer :
++           device.render_pass_fallback.take_framebuffers_for_view(image_view))
++      {
++        device.functions.vkDestroyFramebuffer(device.vk_handle(), framebuffer, nullptr);
++      }
++      device.functions.vkDestroyImageView(device.vk_handle(), image_view, nullptr);
+     }
+     device.resources.remove_swapchain_image(image_handle);
+   });
+-  image_views_.remove_old(current_timeline, [&](VkImageView vk_image_view) {
+-    device.functions.vkDestroyImageView(device.vk_handle(), vk_image_view, nullptr);
+-  });
+   framebuffers_.remove_old(current_timeline, [&](VkFramebuffer vk_framebuffer) {
+     device.functions.vkDestroyFramebuffer(device.vk_handle(), vk_framebuffer, nullptr);
+   });
++  image_views_.remove_old(current_timeline, [&](VkImageView vk_image_view) {
++    device.functions.vkDestroyImageView(device.vk_handle(), vk_image_view, nullptr);
++  });
+ 
+   allocations_.remove_old(current_timeline, [&](VmaAllocation vma_allocation) {
+     vmaFreeMemory(device.mem_allocator_get(), vma_allocation);
+diff --git a/source/blender/gpu/vulkan/vk_resource_pool.hh b/source/blender/gpu/vulkan/vk_resource_pool.hh
+index 281fb790..a534ab61 100644
+--- a/source/blender/gpu/vulkan/vk_resource_pool.hh
++++ b/source/blender/gpu/vulkan/vk_resource_pool.hh
+@@ -117,7 +117,6 @@ class VKDiscardPool {
+       Span<render_graph::VKResourceStateTracker::DiscardableResource> discardable,
+       TimelineValue timeline);
+   void discard_allocation(VmaAllocation vma_allocation);
+-  void discard_framebuffer(VkFramebuffer vk_framebuffer, TimelineValue timeline = UINT64_MAX);
+   void discard_shader_module(VkShaderModule vk_shader_module);
+   void discard_pipeline(VkPipeline vk_pipeline);
+   void discard_pipeline_layout(VkPipelineLayout vk_pipeline_layout);

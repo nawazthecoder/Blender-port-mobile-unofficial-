@@ -1,0 +1,202 @@
+diff --git a/build_files/android/apk/app/build.gradle b/build_files/android/apk/app/build.gradle
+index 126444d1..578a2745 100644
+--- a/build_files/android/apk/app/build.gradle
++++ b/build_files/android/apk/app/build.gradle
+@@ -24,8 +24,8 @@ android {
+     applicationId 'org.blender.androidport'
+     minSdk 31
+     targetSdk 34
+-    versionCode 5030015
+-    versionName '5.3.0-android.15'
++    versionCode 5030016
++    versionName '5.3.0-android.16'
+     ndk { abiFilters 'arm64-v8a' }
+   }
+ 
+diff --git a/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java b/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java
+index d9ae7fd4..f09c6146 100644
+--- a/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java
++++ b/build_files/android/apk/app/src/main/java/org/blender/blender/BlenderActivity.java
+@@ -85,6 +85,7 @@ public class BlenderActivity extends NativeActivity {
+      * log is opened as the first thing it does. */
+     chooseLogPath();
+     publishHardwareNames();
++    publishProcessIdentity();
+     /* Also before super.onCreate: the native side reads it while building argv. */
+     publishLaunchFile(getIntent());
+     super.onCreate(state);
+@@ -561,6 +562,24 @@ public class BlenderActivity extends NativeActivity {
+     }
+   }
+ 
++  private void publishProcessIdentity() {
++    try {
++      String version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
++      Os.setenv("BLENDER_ANDROID_APP_VERSION", version, true);
++      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
++        ActivityManager manager = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
++        if (manager != null) {
++          String state = "version=" + version + ";pid=" + android.os.Process.myPid()
++              + ";launch_ms=" + System.currentTimeMillis();
++          manager.setProcessStateSummary(state.getBytes(java.nio.charset.StandardCharsets.UTF_8));
++        }
++      }
++    }
++    catch (Exception ex) {
++      Log.w(TAG, "could not record process identity", ex);
++    }
++  }
++
+   /* Android records native crashes, ANRs and low-memory process deaths. Export
+    * the newest exit on the next launch so a phone-only report needs no adb.
+    * A native trace may be binary; keep it separate from the readable summary. */
+@@ -584,9 +603,15 @@ public class BlenderActivity extends NativeActivity {
+         }
+         File directory = new File(logPath).getParentFile();
+         File report = new File(directory, "blender-last-exit.txt");
++        byte[] processState = exit.getProcessStateSummary();
+         String summary = "Blender Android previous process exit\n"
+             + "time=" + new java.util.Date(exit.getTimestamp()) + "\n"
+             + "reason=" + exit.getReason() + "\n"
++            + "low_memory_kill=" + (exit.getReason() == ApplicationExitInfo.REASON_LOW_MEMORY) + "\n"
++            + "pid=" + exit.getPid() + "\n"
++            + "importance=" + exit.getImportance() + "\n"
++            + "process_state=" + (processState == null ? "unavailable" :
++                new String(processState, java.nio.charset.StandardCharsets.UTF_8)) + "\n"
+             + "status=" + exit.getStatus() + "\n"
+             + "description=" + exit.getDescription() + "\n"
+             + "pss_kib=" + exit.getPss() + "\n"
+diff --git a/build_files/android/apk/package.sh b/build_files/android/apk/package.sh
+index d5616807..2c361377 100755
+--- a/build_files/android/apk/package.sh
++++ b/build_files/android/apk/package.sh
+@@ -382,7 +382,7 @@ fi
+   "$STAGE/rescompiled/res.zip" \
+   -A "$ASSETS" -0 zip \
+   --min-sdk-version "$ANDROID_API" --target-sdk-version "$ANDROID_TARGET_API" \
+-  --version-code 5030015 --version-name "5.3.0-android.15"
++  --version-code 5030016 --version-name "5.3.0-android.16"
+ 
+ echo "[apk] assembling"
+ cp "$STAGE/base.apk" "$OUT"
+diff --git a/intern/ghost/intern/GHOST_AndroidMain.cc b/intern/ghost/intern/GHOST_AndroidMain.cc
+index f980f6bb..bcfd14b7 100644
+--- a/intern/ghost/intern/GHOST_AndroidMain.cc
++++ b/intern/ghost/intern/GHOST_AndroidMain.cc
+@@ -73,6 +73,12 @@ static bool ghost_android_try_log(const std::string &dir, const char *what)
+     return false;
+   }
+   g_log_path = path;
++  const char *version = getenv("BLENDER_ANDROID_APP_VERSION");
++  fprintf(g_stdio_log,
++          "[BlenderAndroid] version=%s pid=%ld\n",
++          version ? version : "unknown",
++          long(getpid()));
++  fflush(g_stdio_log);
+   __android_log_print(ANDROID_LOG_INFO, "blender", "startup log (%s): %s", what, path.c_str());
+   return true;
+ }
+diff --git a/intern/ghost/intern/GHOST_ContextVK.cc b/intern/ghost/intern/GHOST_ContextVK.cc
+index 3ecaf825..272ba090 100644
+--- a/intern/ghost/intern/GHOST_ContextVK.cc
++++ b/intern/ghost/intern/GHOST_ContextVK.cc
+@@ -345,6 +345,9 @@ class GHOST_DeviceVK {
+     vma_allocator_create_info.device = vk_device;
+     vma_allocator_create_info.instance = vk_instance;
+ #ifdef __ANDROID__
++    /* VMA otherwise prefers 256 MiB blocks on large heaps. Android GPU allocations share
++     * physical RAM with the editor and shader compiler; avoid retaining that much slack. */
++    vma_allocator_create_info.preferredLargeHeapBlockSize = 32ull * 1024 * 1024;
+     VmaVulkanFunctions vulkan_functions = {};
+     vulkan_functions.vkGetInstanceProcAddr = volk::vkGetInstanceProcAddr;
+     vulkan_functions.vkGetDeviceProcAddr = volk::vkGetDeviceProcAddr;
+@@ -361,6 +364,9 @@ class GHOST_DeviceVK {
+     vmaImportVulkanFunctionsFromVolk(&vma_allocator_create_info, &vma_vulkan_functions);
+     vma_allocator_create_info.pVulkanFunctions = &vma_vulkan_functions;
+     vmaCreateAllocator(&vma_allocator_create_info, &vma_allocator);
++#ifdef __ANDROID__
++    CLOG_INFO(&LOG, "Android GPU allocator: preferred block=32 MiB");
++#endif
+   }
+ };
+ 
+diff --git a/source/blender/gpu/vulkan/vk_backend.cc b/source/blender/gpu/vulkan/vk_backend.cc
+index dee19f5c..8011ac19 100644
+--- a/source/blender/gpu/vulkan/vk_backend.cc
++++ b/source/blender/gpu/vulkan/vk_backend.cc
+@@ -1150,9 +1150,10 @@ void VKBackend::capabilities_init(VKDevice &device)
+       GPU_type_matches(GPU_DEVICE_QUALCOMM, GPU_OS_ANY, GPU_DRIVER_ANY),
+       device.supports_extension(VK_KHR_SPIRV_1_4_EXTENSION_NAME));
+   CLOG_INFO(&LOG,
+-            "Android shaders: target=%s, compiler workers=%d",
++            "Android shaders: target=%s, compiler workers=%d, physical RAM=%llu MiB",
+             target.cache_directory,
+-            GCaps.max_parallel_compilations);
++            GCaps.max_parallel_compilations,
++            (unsigned long long)(memory_bytes >> 20));
+ #endif
+   GCaps.mem_stats_support = true;
+ 
+diff --git a/source/blender/gpu/vulkan/vk_shader_runtime.hh b/source/blender/gpu/vulkan/vk_shader_runtime.hh
+index e1ddd73d..5f715df0 100644
+--- a/source/blender/gpu/vulkan/vk_shader_runtime.hh
++++ b/source/blender/gpu/vulkan/vk_shader_runtime.hh
+@@ -62,7 +62,11 @@ inline bool vk_pipeline_cache_size_valid(int64_t file_size,
+ 
+ inline int vk_android_shader_compile_workers(int thread_count, uint64_t memory_bytes)
+ {
+-  const int limit = memory_bytes == 0 || memory_bytes < (6ull << 30) ? 2 : 4;
++  /* A 4 GiB phone can be killed while two EEVEE compilers and the preview allocate together.
++   * Unknown memory is conservative; roomier devices keep the previous parallelism. */
++  const int limit = memory_bytes == 0 || memory_bytes <= (4ull << 30) ?
++                        1 :
++                        (memory_bytes < (6ull << 30) ? 2 : 4);
+   return std::clamp(thread_count, 1, limit);
+ }
+ 
+diff --git a/source/blender/gpu/vulkan/vk_texture_pool.cc b/source/blender/gpu/vulkan/vk_texture_pool.cc
+index 5fd84715..cd79201f 100644
+--- a/source/blender/gpu/vulkan/vk_texture_pool.cc
++++ b/source/blender/gpu/vulkan/vk_texture_pool.cc
+@@ -214,10 +214,10 @@ void VKImageCache::discard_all_of(VmaAllocation allocation)
+ std::optional<VKMemorySegment> VKTexturePool::AllocationHandle::acquire(
+     VkMemoryRequirements requirements)
+ {
+-  /* `memoryType` uses 0 as special value to indicate no memory type restrictions.
+-   * If there are restrictions, we check as a mask against `memoryTypeBits`. */
++  /* VmaAllocationInfo::memoryType is an index, including index zero. Unlike the
++   * VmaAllocationCreateInfo bitmask, it has no value meaning "unrestricted". */
+   uint32_t memory_type_bit = 1u << allocation_info.memoryType;
+-  if (allocation_info.memoryType != 0 && !bool(requirements.memoryTypeBits & memory_type_bit)) {
++  if (!bool(requirements.memoryTypeBits & memory_type_bit)) {
+     return {};
+   }
+ 
+@@ -338,6 +338,9 @@ void VKTexturePool::AllocationHandle::free()
+ 
+ VKTexturePool::VKTexturePool()
+ {
++#ifdef __ANDROID__
++  CLOG_INFO(&LOG, "Android texture pool: minimum reservation=8 MiB (large images stay full size)");
++#endif
+   /* VKImageCache causes sporadic crashes on many RDNA2 Mesa configs (dGPU, iGPU; #154768,
+    * #155202). As Mesa has fast VkImage handle creation, it is simply not instantiated there. */
+   if (!GPU_type_matches(GPU_DEVICE_ATI, GPU_OS_UNIX, GPU_DRIVER_OPENSOURCE)) {
+diff --git a/source/blender/gpu/vulkan/vk_texture_pool.hh b/source/blender/gpu/vulkan/vk_texture_pool.hh
+index 9243932f..b4f104a0 100644
+--- a/source/blender/gpu/vulkan/vk_texture_pool.hh
++++ b/source/blender/gpu/vulkan/vk_texture_pool.hh
+@@ -76,8 +76,12 @@ class VKImageCache {
+ };
+ 
+ class VKTexturePool : public TexturePoolBase {
+-  /* Performed allocation size, current is 64mb. */
++  /* Minimum reservation, not a texture size limit. Larger images get their full requirement. */
++#ifdef __ANDROID__
++  static constexpr VkDeviceSize allocation_size = 1 << 23;
++#else
+   static constexpr VkDeviceSize allocation_size = 1 << 26;
++#endif
+ 
+   /* Defer deallocation enough cycles to avoid interleaved calls to different viewport render
+    * functions (selection / display) causing constant allocation / deallocation (See #113024). */

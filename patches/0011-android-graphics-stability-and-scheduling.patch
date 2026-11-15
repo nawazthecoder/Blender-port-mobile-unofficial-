@@ -1,0 +1,726 @@
+diff --git a/build_files/android/apk/app/build.gradle b/build_files/android/apk/app/build.gradle
+index 563e2916..f135880f 100644
+--- a/build_files/android/apk/app/build.gradle
++++ b/build_files/android/apk/app/build.gradle
+@@ -24,8 +24,8 @@ android {
+     applicationId 'org.blender.androidport'
+     minSdk 31
+     targetSdk 34
+-    versionCode 5020310
+-    versionName '5.2.3-android.10'
++    versionCode 5020311
++    versionName '5.2.3-android.11'
+     ndk { abiFilters 'arm64-v8a' }
+   }
+ 
+diff --git a/build_files/android/apk/package.sh b/build_files/android/apk/package.sh
+index 10703e0d..96c56fe2 100755
+--- a/build_files/android/apk/package.sh
++++ b/build_files/android/apk/package.sh
+@@ -378,7 +378,7 @@ fi
+   "$STAGE/rescompiled/res.zip" \
+   -A "$ASSETS" -0 zip \
+   --min-sdk-version "$ANDROID_API" --target-sdk-version "$ANDROID_TARGET_API" \
+-  --version-code 5020310 --version-name "5.2.3-android.10"
++  --version-code 5020311 --version-name "5.2.3-android.11"
+ 
+ echo "[apk] assembling"
+ cp "$STAGE/base.apk" "$OUT"
+diff --git a/build_files/android/build_oidn.sh b/build_files/android/build_oidn.sh
+index 254f8fa5..daff2c86 100644
+--- a/build_files/android/build_oidn.sh
++++ b/build_files/android/build_oidn.sh
+@@ -40,7 +40,16 @@ mkdir -p "$DEPS"
+ 
+ log() { echo "[oidn] $*"; }
+ 
+-if [ -f "$PREFIX/lib/libOpenImageDenoise_core.a" ]; then
++download() {
++  local url="$1" target="$2"
++  # A failed/retried HTTP response must never be piped into tar or installed as an archive.
++  curl -fL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 \
++    -o "$target.part" "$url"
++  mv -f "$target.part" "$target"
++}
++
++if [ -f "$PREFIX/.blender-android-oidn-complete" ] && \
++   [ -f "$PREFIX/lib/libOpenImageDenoise_core.a" ]; then
+   log "OpenImageDenoise $OIDN_VERSION already built"
+   echo "BLENDER_ANDROID_OIDN_ROOT=$PREFIX" >&3
+   exit 0
+@@ -49,10 +58,14 @@ fi
+ # --- ISPC (host compiler for the CPU kernels) --------------------------------
+ if [ ! -x "$ISPC" ]; then
+   log "downloading ISPC $ISPC_VERSION"
++  ISPC_ARCHIVE="$DEPS/ispc-v$ISPC_VERSION-linux.tar.gz"
++  if [ ! -f "$ISPC_ARCHIVE" ] || ! tar -tzf "$ISPC_ARCHIVE" >/dev/null 2>&1; then
++    download "https://github.com/ispc/ispc/releases/download/v$ISPC_VERSION/ispc-v$ISPC_VERSION-linux.tar.gz" "$ISPC_ARCHIVE"
++  fi
++  tar -tzf "$ISPC_ARCHIVE" >/dev/null
+   rm -rf "$ISPC_DIR"
+   mkdir -p "$ISPC_DIR"
+-  curl -fL "https://github.com/ispc/ispc/releases/download/v$ISPC_VERSION/ispc-v$ISPC_VERSION-linux.tar.gz" \
+-    | tar -xz -C "$ISPC_DIR" --strip-components=1
++  tar -xzf "$ISPC_ARCHIVE" -C "$ISPC_DIR" --strip-components=1
+ fi
+ # The help text wraps the OS list, so join it before matching.
+ if ! "$ISPC" --help | tr '\n' ' ' | grep -q -- '--target-os=[^[]*android'; then
+@@ -64,9 +77,7 @@ fi
+ TARBALL="$DEPS/oidn-$OIDN_VERSION.src.tar.gz"
+ if [ ! -f "$TARBALL" ]; then
+   log "downloading OpenImageDenoise $OIDN_VERSION source"
+-  curl -fL -o "$TARBALL.part" \
+-    "https://github.com/RenderKit/oidn/releases/download/v$OIDN_VERSION/oidn-$OIDN_VERSION.src.tar.gz"
+-  mv "$TARBALL.part" "$TARBALL"
++  download "https://github.com/RenderKit/oidn/releases/download/v$OIDN_VERSION/oidn-$OIDN_VERSION.src.tar.gz" "$TARBALL"
+ fi
+ echo "$OIDN_MD5  $TARBALL" | md5sum -c -
+ 
+@@ -101,5 +112,6 @@ cmake -S "$SRC" -B "$BUILD" -G Ninja \
+ log "building OpenImageDenoise $OIDN_VERSION"
+ ninja -j "${BLENDER_BUILD_JOBS:-2}" -C "$BUILD" install
+ 
++touch "$PREFIX/.blender-android-oidn-complete"
+ log "installed: $PREFIX"
+ echo "BLENDER_ANDROID_OIDN_ROOT=$PREFIX" >&3
+diff --git a/intern/ghost/CMakeLists.txt b/intern/ghost/CMakeLists.txt
+index 25022566..f18af331 100644
+--- a/intern/ghost/CMakeLists.txt
++++ b/intern/ghost/CMakeLists.txt
+@@ -26,6 +26,8 @@ set(SRC
+   intern/GHOST_Window.cc
+   intern/GHOST_WindowManager.cc
+ 
++  GHOST_AndroidEventLoop.hh
++  GHOST_VulkanAcquire.hh
+   GHOST_CallbackEventConsumer.hh
+   GHOST_IContext.hh
+   GHOST_IEvent.hh
+diff --git a/intern/ghost/GHOST_AndroidEventLoop.hh b/intern/ghost/GHOST_AndroidEventLoop.hh
+new file mode 100644
+index 00000000..19e51275
+--- /dev/null
++++ b/intern/ghost/GHOST_AndroidEventLoop.hh
+@@ -0,0 +1,11 @@
++/* SPDX-FileCopyrightText: 2026 Blender Authors
++ * SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++#include <cstdint>
++
++#ifdef __ANDROID__
++/* Wait for native input/lifecycle readiness without consuming its android_poll_source. The outer
++ * Android loop processes that source before the next Blender iteration. Timers bound this wait. */
++void GHOST_android_wait_for_events(int32_t timeout_us);
++bool GHOST_android_is_drawable();
++#endif
+diff --git a/intern/ghost/GHOST_VulkanAcquire.hh b/intern/ghost/GHOST_VulkanAcquire.hh
+new file mode 100644
+index 00000000..a55e7322
+--- /dev/null
++++ b/intern/ghost/GHOST_VulkanAcquire.hh
+@@ -0,0 +1,31 @@
++/* SPDX-FileCopyrightText: 2026 Blender Authors
++ * SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++#include <cstdint>
++#include <optional>
++#include <vulkan/vulkan.h>
++
++struct GHOST_VulkanAcquireResult {
++  VkResult result = VK_NOT_READY;
++  std::optional<uint32_t> image_index;
++};
++
++/* An error never supplies an owned image. Retry only OUT_OF_DATE, with a finite bound so an
++ * Android resize storm cannot starve input/lifecycle processing. SUBOPTIMAL owns a valid image. */
++template<typename Acquire, typename Recreate>
++GHOST_VulkanAcquireResult GHOST_vulkan_acquire_image(Acquire acquire, Recreate recreate,
++                                                   uint32_t max_attempts = 3)
++{
++  VkResult result = VK_NOT_READY;
++  for (uint32_t attempt = 0; attempt < max_attempts; attempt++) {
++    uint32_t image_index = 0;
++    result = acquire(&image_index);
++    if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) {
++      return {result, image_index};
++    }
++    if (result != VK_ERROR_OUT_OF_DATE_KHR || attempt + 1 == max_attempts || !recreate()) {
++      break;
++    }
++  }
++  return {result, std::nullopt};
++}
+diff --git a/intern/ghost/intern/GHOST_AndroidMain.cc b/intern/ghost/intern/GHOST_AndroidMain.cc
+index ec05618b..f980f6bb 100644
+--- a/intern/ghost/intern/GHOST_AndroidMain.cc
++++ b/intern/ghost/intern/GHOST_AndroidMain.cc
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include "GHOST_ISystem.hh"
++#include "GHOST_AndroidEventLoop.hh"
+ #include "GHOST_SystemAndroid.hh"
+ 
+ #include <android/log.h>
+@@ -334,6 +335,25 @@ extern "C" JNIEXPORT void JNICALL Java_org_blender_blender_BlenderActivity_nativ
+   env->ReleaseStringUTFChars(path, utf);
+ }
+ 
++void GHOST_android_wait_for_events(int32_t timeout_us)
++{
++  /* Polling readiness does not consume the command/input fd. Its source is processed by
++   * android_main, keeping lifecycle changes outside an in-progress Blender iteration. */
++  const int timeout_ms = timeout_us > 0 ? (timeout_us + 999) / 1000 : 0;
++  ALooper_pollOnce(timeout_ms, nullptr, nullptr, nullptr);
++}
++
++static bool android_can_draw(const android_app *app)
++{
++  return g_context && app->window && app->activityState == APP_CMD_RESUME;
++}
++
++bool GHOST_android_is_drawable()
++{
++  const android_app *app = GHOST_SystemAndroid::getAndroidApp();
++  return app && android_can_draw(app);
++}
++
+ extern "C" void android_main(struct android_app *app)
+ {
+   ghost_android_open_log(app);
+@@ -346,12 +366,9 @@ extern "C" void android_main(struct android_app *app)
+   while (!app->destroyRequested) {
+     int events;
+     android_poll_source *source;
+-    /* Block until the window exists (and Blender is launched); afterwards never
+-     * block, so we fall through to render every frame. `GHOST_android_launch`
+-     * runs the whole init inside `source->process` and sets `g_context`
+-     * mid-drain, so the timeout must be re-evaluated after each event rather
+-     * than captured once — otherwise the loop blocks forever and never renders. */
+-    int timeout = g_context ? 0 : -1;
++    /* Background jobs and timers still run at a lower rate while UI drawing is paused.
++     * Native input/lifecycle fds wake this wait immediately. */
++    int timeout = g_context ? (android_can_draw(app) ? 0 : 100) : -1;
+     while (ALooper_pollOnce(timeout, nullptr, &events, (void **)&source) >= 0) {
+       if (source) {
+         source->process(app, source);
+@@ -359,9 +376,7 @@ extern "C" void android_main(struct android_app *app)
+       if (app->destroyRequested) {
+         return;
+       }
+-      if (g_context) {
+-        timeout = 0;
+-      }
++      timeout = g_context ? (android_can_draw(app) ? 0 : 100) : -1;
+     }
+ 
+     if (g_context) {
+diff --git a/intern/ghost/intern/GHOST_ContextVK.cc b/intern/ghost/intern/GHOST_ContextVK.cc
+index e1bbcbfd..49a0d443 100644
+--- a/intern/ghost/intern/GHOST_ContextVK.cc
++++ b/intern/ghost/intern/GHOST_ContextVK.cc
+@@ -7,6 +7,7 @@
+  */
+ 
+ #include "GHOST_ContextVK.hh"
++#include "GHOST_VulkanAcquire.hh"
+ #include "GHOST_Types.hh"
+ #include <vulkan/vulkan_core.h>
+ 
+@@ -986,6 +987,35 @@ GHOST_TSuccess GHOST_ContextVK::swapBufferAcquire()
+   }
+ #endif
+ 
++  const bool use_hdr_swapchain = hdr_info_ &&
++                                 (hdr_info_->wide_gamut_enabled || hdr_info_->hdr_enabled) &&
++                                 device_vk.use_vk_ext_swapchain_colorspace;
++  const auto acquire_failure = [&](VkResult result) {
++    if (result != VK_TIMEOUT && result != VK_NOT_READY && result != last_acquire_result_) {
++      CLOG_WARN(&LOG, "Vulkan: skipping frame after acquisition failure [%s]",
++                blender::gpu::to_string(result));
++    }
++    last_acquire_result_ = result;
++#ifdef __ANDROID__
++    if (result == VK_ERROR_SURFACE_LOST_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
++      android_surface_dirty_ = true;
++    }
++#endif
++    return GHOST_kFailure;
++  };
++#ifdef __ANDROID__
++  /* Keep input/lifecycle processing live if the GPU or compositor is temporarily busy. */
++  constexpr uint64_t frame_wait_ns = 20000000ull;
++#else
++  constexpr uint64_t frame_wait_ns = UINT64_MAX;
++#endif
++  if (frame_data_.empty()) {
++    recreateSwapchain(use_hdr_swapchain);
++    if (frame_data_.empty()) {
++      return acquire_failure(VK_NOT_READY);
++    }
++  }
++
+   /* This method is called after all the draw calls in the application, and it signals that
+    * we are ready to both (1) submit commands for those draw calls to the device and
+    * (2) begin building the next frame. It is assumed as an invariant that the submission fence
+@@ -1005,16 +1035,17 @@ GHOST_TSuccess GHOST_ContextVK::swapBufferAcquire()
+    * still happen in parallel, but acquiring needs can only happen when the frame acquire semaphore
+    * has been signaled and waited for. */
+   if (submission_frame_data.submission_fence) {
+-    vkWaitForFences(vk_device, 1, &submission_frame_data.submission_fence, true, UINT64_MAX);
++    const VkResult wait_result = vkWaitForFences(
++        vk_device, 1, &submission_frame_data.submission_fence, true, frame_wait_ns);
++    if (wait_result != VK_SUCCESS) {
++      return acquire_failure(wait_result);
++    }
+   }
+   for (VkSwapchainKHR swapchain : submission_frame_data.discard_pile.swapchains) {
+     this->destroySwapchainPresentFences(swapchain);
+   }
+   submission_frame_data.discard_pile.destroy(vk_device);
+ 
+-  const bool use_hdr_swapchain = hdr_info_ &&
+-                                 (hdr_info_->wide_gamut_enabled || hdr_info_->hdr_enabled) &&
+-                                 device_vk.use_vk_ext_swapchain_colorspace;
+   if (use_hdr_swapchain != use_hdr_swapchain_) {
+     /* Re-create swapchain if HDR mode was toggled in the system settings. */
+     recreateSwapchain(use_hdr_swapchain);
+@@ -1051,21 +1082,22 @@ GHOST_TSuccess GHOST_ContextVK::swapBufferAcquire()
+      * swapchain image. Other do it when calling vkQueuePresent. */
+     /* Not SUBOPTIMAL: that image is acquired and usable, so re-acquiring would leak it.
+      * Requesting an IDENTITY preTransform on a rotated display makes it permanent. */
+-    VkResult acquire_result = VK_ERROR_OUT_OF_DATE_KHR;
+-    while (swapchain_ != VK_NULL_HANDLE && acquire_result == VK_ERROR_OUT_OF_DATE_KHR) {
+-      acquire_result = vkAcquireNextImageKHR(
+-          vk_device,
+-          swapchain_,
+-          UINT64_MAX,
+-          /* Not `submission_frame_data`: recreateSwapchain() can grow `frame_data_`, which
+-           * reallocates and leaves that reference dangling (null semaphore on acquire). */
+-          frame_data_[render_frame_].acquire_semaphore,
+-          VK_NULL_HANDLE,
+-          &image_index);
+-      if (acquire_result == VK_ERROR_OUT_OF_DATE_KHR) {
+-        recreateSwapchain(use_hdr_swapchain);
+-      }
++    const GHOST_VulkanAcquireResult acquired = GHOST_vulkan_acquire_image(
++        [&](uint32_t *index) {
++          return vkAcquireNextImageKHR(
++              vk_device, swapchain_, frame_wait_ns,
++              /* Recreate may grow/reallocate frame_data_: never retain its old reference. */
++              frame_data_[render_frame_].acquire_semaphore, VK_NULL_HANDLE, index);
++        },
++        [&]() {
++          return recreateSwapchain(use_hdr_swapchain) == GHOST_kSuccess &&
++                 swapchain_ != VK_NULL_HANDLE;
++        });
++    if (!acquired.image_index) {
++      return acquire_failure(acquired.result);
+     }
++    image_index = *acquired.image_index;
++    last_acquire_result_ = VK_SUCCESS;
+   }
+ 
+   /* Acquired callback is also called when there is no swapchain.
+@@ -1084,7 +1116,11 @@ GHOST_TSuccess GHOST_ContextVK::swapBufferAcquire()
+ 
+   if (swapchain_ == VK_NULL_HANDLE) {
+     CLOG_TRACE(&LOG, "Swap-chain unavailable (minimized window).");
++#ifdef __ANDROID__
++    return GHOST_kFailure;
++#else
+     return GHOST_kSuccess;
++#endif
+   }
+ 
+   CLOG_DEBUG(&LOG,
+@@ -1212,6 +1248,11 @@ GHOST_TSuccess GHOST_ContextVK::swapBufferRelease()
+     return GHOST_kSuccess;
+   }
+   if (present_result != VK_SUCCESS) {
++#ifdef __ANDROID__
++    if (present_result == VK_ERROR_SURFACE_LOST_KHR) {
++      android_surface_dirty_ = true;
++    }
++#endif
+     CLOG_ERROR(&LOG,
+                "Vulkan: failed to present swap-chain image : %s",
+                blender::gpu::to_string(present_result));
+diff --git a/intern/ghost/intern/GHOST_ContextVK.hh b/intern/ghost/intern/GHOST_ContextVK.hh
+index 79884283..3eb0fed1 100644
+--- a/intern/ghost/intern/GHOST_ContextVK.hh
++++ b/intern/ghost/intern/GHOST_ContextVK.hh
+@@ -299,6 +299,7 @@ class GHOST_ContextVK : public GHOST_Context {
+   bool use_hdr_swapchain_;
+ 
+   std::optional<uint32_t> acquired_swapchain_image_index_;
++  VkResult last_acquire_result_ = VK_SUCCESS;
+ 
+   std::function<void(const GHOST_VulkanSwapChainData *, bool)> swap_buffer_draw_callback_;
+   std::function<void(void)> swap_buffer_acquired_callback_;
+diff --git a/source/blender/gpu/CMakeLists.txt b/source/blender/gpu/CMakeLists.txt
+index b43a4897..6b37d73a 100644
+--- a/source/blender/gpu/CMakeLists.txt
++++ b/source/blender/gpu/CMakeLists.txt
+@@ -351,6 +351,7 @@ set(VULKAN_SRC
+   vulkan/render_graph/nodes/vk_update_mipmaps_node.hh
+   vulkan/render_graph/vk_command_buffer_wrapper.hh
+   vulkan/render_graph/vk_command_builder.hh
++  vulkan/render_graph/vk_image_barrier.hh
+   vulkan/render_graph/vk_render_graph.hh
+   vulkan/render_graph/vk_render_graph_links.hh
+   vulkan/render_graph/vk_render_graph_node.hh
+diff --git a/source/blender/gpu/vulkan/render_graph/vk_command_builder.cc b/source/blender/gpu/vulkan/render_graph/vk_command_builder.cc
+index e5ab0894..2fe5aa5b 100644
+--- a/source/blender/gpu/vulkan/render_graph/vk_command_builder.cc
++++ b/source/blender/gpu/vulkan/render_graph/vk_command_builder.cc
+@@ -7,6 +7,7 @@
+  */
+ 
+ #include "vk_command_builder.hh"
++#include "vk_image_barrier.hh"
+ #include "BLI_index_range.hh"
+ #include "vk_backend.hh"
+ #include "vk_render_graph.hh"
+@@ -285,6 +286,11 @@ void VKCommandBuilder::groups_extract_barriers(VKRenderGraph &render_graph,
+           }
+           VKResourceStateTracker::Resource &resource = render_graph.resources_.get_image_resource(
+               link.resource.handle);
++          if (resource.use_subresource_tracking()) {
++            /* Whole-image state is the baseline, not the layout of this attachment's mip/layer.
++             * ImageTracker and its scoped access barrier already own that transition. */
++            continue;
++          }
+           VkImageLayout gpu_layout = resource.barrier_state.image_layout;
+           VkImageLayout optimal_layout = to_default_image_layout(link.vk_image_aspect,
+                                                                  use_local_read);
+@@ -794,7 +800,6 @@ void VKCommandBuilder::add_image_read_barriers(VKRenderGraph &render_graph,
+                              link.vk_image_layout,
+                              link.vk_image_aspect,
+                              r_barrier);
+-        resource_state.image_layout = link.vk_image_layout;
+       }
+       /* Image tracker only tracks layout changes. Access flag synchronization is still needed
+        * to avoid WRITE->READ hazards between rendering scopes. See #158501. */
+@@ -809,7 +814,7 @@ void VKCommandBuilder::add_image_read_barriers(VKRenderGraph &render_graph,
+         resource_state.vk_access |= link.vk_access_flags;
+         resource_state.vk_pipeline_stages |= node_stages;
+       }
+-      if (wait_access != VK_ACCESS_NONE && (wait_access & ~link.vk_access_flags) != 0) {
++      if (image_access_needs_dependency(wait_access, link.vk_access_flags)) {
+         add_image_barrier(resource.image.vk_image,
+                           r_barrier,
+                           wait_access,
+@@ -817,7 +822,7 @@ void VKCommandBuilder::add_image_read_barriers(VKRenderGraph &render_graph,
+                           resource_state.image_layout,
+                           link.vk_image_layout,
+                           link.vk_image_aspect,
+-                          {});
++                          link.subimage);
+       }
+       continue;
+     }
+@@ -881,7 +886,6 @@ void VKCommandBuilder::add_image_write_barriers(VKRenderGraph &render_graph,
+                              link.vk_image_layout,
+                              link.vk_image_aspect,
+                              r_barrier);
+-        resource_state.image_layout = link.vk_image_layout;
+       }
+       /* Image tracker only tracks layout changes. Access flag synchronization is still needed
+        * to avoid READ->WRITE hazards between rendering scopes. See #158501. */
+@@ -889,7 +893,7 @@ void VKCommandBuilder::add_image_write_barriers(VKRenderGraph &render_graph,
+       r_barrier.dst_stage_mask |= node_stages;
+       resource_state.vk_access = link.vk_access_flags;
+       resource_state.vk_pipeline_stages = node_stages;
+-      if (wait_access != VK_ACCESS_NONE && (wait_access & ~link.vk_access_flags) != 0) {
++      if (image_access_needs_dependency(wait_access, link.vk_access_flags)) {
+         add_image_barrier(resource.image.vk_image,
+                           r_barrier,
+                           wait_access,
+@@ -897,7 +901,7 @@ void VKCommandBuilder::add_image_write_barriers(VKRenderGraph &render_graph,
+                           resource_state.image_layout,
+                           link.vk_image_layout,
+                           link.vk_image_aspect,
+-                          {});
++                          link.subimage);
+       }
+       continue;
+     }
+@@ -932,51 +936,19 @@ void VKCommandBuilder::add_image_barrier(VkImage vk_image,
+                                          const VKSubImageRange &subimage)
+ {
+   BLI_assert(aspect_mask != VK_IMAGE_ASPECT_NONE);
+-  for (VkImageMemoryBarrier &vk_image_memory_barrier :
+-       vk_image_memory_barriers_.as_mutable_span().drop_front(
++  const VkImageMemoryBarrier incoming = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
++      nullptr, src_access_mask, dst_access_mask, old_image_layout, new_image_layout,
++      VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, vk_image,
++      {aspect_mask, subimage.mipmap_level, subimage.mipmap_count,
++       subimage.layer_base, subimage.layer_count}};
++  for (VkImageMemoryBarrier &barrier : vk_image_memory_barriers_.as_mutable_span().drop_front(
+            r_barrier.image_memory_barriers.start()))
+   {
+-    if (vk_image_memory_barrier.image == vk_image) {
+-      /* When registering read/write buffers, it can be that the node internally requires
+-       * read/write. In this case we adjust the dstAccessMask of the read barrier. An example is
+-       * EEVEE update HIZ compute shader and shadow tagging. */
+-      if ((vk_image_memory_barrier.dstAccessMask & src_access_mask) == src_access_mask) {
+-        vk_image_memory_barrier.dstAccessMask |= dst_access_mask;
+-        vk_image_memory_barrier.srcAccessMask |= src_access_mask;
+-        /* When the existing barrier's newLayout matches the new barrier's
+-         * oldLayout, update to the combined layout transition. For example,
+-         * a read barrier (UNDEFINED->TRANSFER_DST) followed by a write
+-         * barrier (TRANSFER_DST->GENERAL) becomes UNDEFINED->GENERAL. */
+-        if (old_image_layout == vk_image_memory_barrier.newLayout) {
+-          vk_image_memory_barrier.newLayout = new_image_layout;
+-        }
+-        return;
+-      }
+-      /* When re-registering resources we can skip if access mask already contain all the flags.
+-       */
+-      if ((vk_image_memory_barrier.dstAccessMask & dst_access_mask) == dst_access_mask &&
+-          (vk_image_memory_barrier.srcAccessMask & src_access_mask) == src_access_mask &&
+-          old_image_layout == new_image_layout)
+-      {
+-        return;
+-      }
++    if (image_barrier_try_merge(barrier, incoming)) {
++      return;
+     }
+   }
+-
+-  vk_image_memory_barriers_.append({VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+-                                    nullptr,
+-                                    src_access_mask,
+-                                    dst_access_mask,
+-                                    old_image_layout,
+-                                    new_image_layout,
+-                                    VK_QUEUE_FAMILY_IGNORED,
+-                                    VK_QUEUE_FAMILY_IGNORED,
+-                                    vk_image,
+-                                    {aspect_mask,
+-                                     subimage.mipmap_level,
+-                                     subimage.mipmap_count,
+-                                     subimage.layer_base,
+-                                     subimage.layer_count}});
++  vk_image_memory_barriers_.append(incoming);
+ }
+ 
+ /** \} */
+@@ -1009,10 +981,11 @@ void VKCommandBuilder::ImageTracker::update(VkImage vk_image,
+                                             Barrier &r_barrier)
+ {
+   for (const SubImageChange &change : changes) {
+-    if (change.vk_image == vk_image && ((subimage.layer_count != VK_REMAINING_ARRAY_LAYERS &&
+-                                         change.subimage.layer_base == subimage.layer_base) ||
+-                                        (subimage.mipmap_count != VK_REMAINING_MIP_LEVELS &&
+-                                         change.subimage.mipmap_level == subimage.mipmap_level)))
++    if (change.vk_image == vk_image && image_subresource_ranges_equal(
++            {aspect, subimage.mipmap_level, subimage.mipmap_count,
++             subimage.layer_base, subimage.layer_count},
++            {change.vk_image_aspect, change.subimage.mipmap_level, change.subimage.mipmap_count,
++             change.subimage.layer_base, change.subimage.layer_count}))
+     {
+       BLI_assert_msg(
+           change.vk_image_layout == new_layout,
+@@ -1080,9 +1053,13 @@ void VKCommandBuilder::ImageTracker::suspend(Barrier &r_barrier, bool use_local_
+         r_barrier,
+         VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT |
+             VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
++            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
++            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+             VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
+         VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT |
+             VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
++            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
++            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+             VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
+         change.vk_image_layout,
+         to_default_image_layout(change.vk_image_aspect, use_local_read),
+diff --git a/source/blender/gpu/vulkan/render_graph/vk_image_barrier.hh b/source/blender/gpu/vulkan/render_graph/vk_image_barrier.hh
+new file mode 100644
+index 00000000..9bd7eaf1
+--- /dev/null
++++ b/source/blender/gpu/vulkan/render_graph/vk_image_barrier.hh
+@@ -0,0 +1,50 @@
++/* SPDX-FileCopyrightText: 2026 Blender Authors
++ * SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++#include <vulkan/vulkan.h>
++
++namespace blender::gpu::render_graph {
++
++inline bool image_subresource_ranges_equal(const VkImageSubresourceRange &a,
++                                           const VkImageSubresourceRange &b)
++{
++  return a.aspectMask == b.aspectMask && a.baseMipLevel == b.baseMipLevel &&
++         a.levelCount == b.levelCount && a.baseArrayLayer == b.baseArrayLayer &&
++         a.layerCount == b.layerCount;
++}
++
++/* Only barriers describing the same subresources can be folded into one transition. Dropping
++ * another mip/layer/aspect leaves it in its old layout, even if the VkImage handle matches. */
++inline bool image_barrier_try_merge(VkImageMemoryBarrier &current,
++                                    const VkImageMemoryBarrier &next)
++{
++  if (current.image != next.image || current.pNext || next.pNext ||
++      current.srcQueueFamilyIndex != next.srcQueueFamilyIndex ||
++      current.dstQueueFamilyIndex != next.dstQueueFamilyIndex ||
++      !image_subresource_ranges_equal(current.subresourceRange, next.subresourceRange))
++  {
++    return false;
++  }
++  const bool same_transition = current.oldLayout == next.oldLayout &&
++                               current.newLayout == next.newLayout;
++  const bool chained_transition = current.newLayout == next.oldLayout;
++  if (!same_transition && !chained_transition) {
++    return false;
++  }
++  current.srcAccessMask |= next.srcAccessMask;
++  current.dstAccessMask |= next.dstAccessMask;
++  if (chained_transition) {
++    current.newLayout = next.newLayout;
++  }
++  return true;
++}
++
++/* Identical write flags still require a dependency (WAW); read/read does not. */
++inline bool image_access_needs_dependency(VkAccessFlags previous, VkAccessFlags next)
++{
++  constexpr VkAccessFlags writes = VK_ACCESS_SHADER_WRITE_BIT |
++      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
++      VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
++  return previous != 0 && ((previous | next) & writes) != 0;
++}
++}  // namespace blender::gpu::render_graph
+diff --git a/source/blender/windowmanager/intern/wm_draw.cc b/source/blender/windowmanager/intern/wm_draw.cc
+index 6b68ab72..3e92289c 100644
+--- a/source/blender/windowmanager/intern/wm_draw.cc
++++ b/source/blender/windowmanager/intern/wm_draw.cc
+@@ -37,6 +37,9 @@
+ #include "BKE_screen.hh"
+ 
+ #include "GHOST_ISystem.hh"
++#ifdef __ANDROID__
++#  include "GHOST_AndroidEventLoop.hh"
++#endif
+ #include "GHOST_IWindow.hh"
+ #include "GHOST_Rect.hh"
+ #include "GHOST_Types.hh"
+@@ -1649,6 +1652,11 @@ void WM_paint_cursor_tag_redraw(wmWindow *win, ARegion * /*region*/)
+ 
+ void wm_draw_update(bContext *C)
+ {
++#ifdef __ANDROID__
++  if (!GHOST_android_is_drawable()) {
++    return;
++  }
++#endif
+   PRF_scope(ProfileCategory::Draw);
+ 
+   Main *bmain = CTX_data_main(C);
+@@ -1686,10 +1694,12 @@ void wm_draw_update(bContext *C)
+     CTX_wm_window_set(C, &win);
+ 
+     if (wm_draw_update_test_window(bmain, C, &win)) {
+-      PRF_frame_mark_start("Window Drawing"_ustr);
+-      /* Sets context window+screen. */
++      /* Keep dirty flags and skip drawing if no swapchain image was acquired. */
+       wm_window_make_drawable(wm, &win);
+-      wm_window_swap_buffer_acquire(&win);
++      if (!wm_window_swap_buffer_acquire(&win)) {
++        continue;
++      }
++      PRF_frame_mark_start("Window Drawing"_ustr);
+ 
+       /* Notifiers for screen redraw. */
+       ED_screen_ensure_updated(C, wm, &win);
+diff --git a/source/blender/windowmanager/intern/wm_window.cc b/source/blender/windowmanager/intern/wm_window.cc
+index 7a45bb05..42c20ae5 100644
+--- a/source/blender/windowmanager/intern/wm_window.cc
++++ b/source/blender/windowmanager/intern/wm_window.cc
+@@ -30,6 +30,10 @@
+ #include "GHOST_CallbackEventConsumer.hh"
+ #include "GHOST_IContext.hh"
+ #include "GHOST_IEvent.hh"
++#ifdef __ANDROID__
++#  include "GHOST_AndroidEventLoop.hh"
++#endif
++
+ #include "GHOST_ISystem.hh"
+ #include "GHOST_IWindow.hh"
+ #include "GHOST_Types.hh"
+@@ -1082,16 +1086,14 @@ static void wm_window_ghostwindow_add(wmWindowManager *wm,
+     ui::theme::get_color_3fv(TH_BACK, window_bg_color);
+ 
+     /* Until screens get drawn, draw a default background using the window theme color. */
+-    wm_window_swap_buffer_acquire(win);
+-    GPU_clear_color(window_bg_color[0], window_bg_color[1], window_bg_color[2], 1.0f);
+-
+     /* Needed here, because it's used before it reads #UserDef. */
+     WM_window_dpi_set_userdef(win);
+-
+-    wm_window_swap_buffer_release(win);
+-
+-    /* Clear double buffer to avoids flickering of new windows on certain drivers, see #97600. */
+-    GPU_clear_color(window_bg_color[0], window_bg_color[1], window_bg_color[2], 1.0f);
++    if (wm_window_swap_buffer_acquire(win)) {
++      GPU_clear_color(window_bg_color[0], window_bg_color[1], window_bg_color[2], 1.0f);
++      wm_window_swap_buffer_release(win);
++      /* Clear double buffer to avoid flickering of new windows on certain drivers, see #97600. */
++      GPU_clear_color(window_bg_color[0], window_bg_color[1], window_bg_color[2], 1.0f);
++    }
+ 
+     GPU_render_end();
+   }
+@@ -2232,7 +2234,12 @@ void wm_window_events_process(const bContext *C)
+   wm_jobs_handle_finished(C);
+ 
+   /* When there is no event, sleep 5 milliseconds not to use too much CPU when idle. */
++#ifdef __ANDROID__
++  /* Native input wakes the looper immediately; timers can shorten this idle budget. */
++  const int sleep_us_default = 16000;
++#else
+   const int sleep_us_default = 5000;
++#endif
+   int sleep_us = has_event ? 0 : sleep_us_default;
+   has_event |= wm_window_timers_process(C, &sleep_us);
+ #ifdef WITH_XR_OPENXR
+@@ -2245,7 +2252,11 @@ void wm_window_events_process(const bContext *C)
+   /* Skip sleeping when simulating events so tests don't idle unnecessarily as simulated
+    * events are typically generated from a timer that runs in the main loop. */
+   if ((has_event == false) && (sleep_us != 0) && !(G.f & G_FLAG_EVENT_SIMULATE)) {
++#ifdef __ANDROID__
++    GHOST_android_wait_for_events(sleep_us);
++#else
+     BLI_time_sleep_precise_us(sleep_us);
++#endif
+   }
+ }
+ 
+@@ -2930,10 +2941,10 @@ void wm_window_raise(wmWindow *win)
+ /** \name Window Buffers
+  * \{ */
+ 
+-void wm_window_swap_buffer_acquire(wmWindow *win)
++bool wm_window_swap_buffer_acquire(wmWindow *win)
+ {
+   GHOST_IWindow *ghost_window = static_cast<GHOST_IWindow *>(win->runtime->ghostwin);
+-  ghost_window->swapBufferAcquire();
++  return ghost_window->swapBufferAcquire() == GHOST_kSuccess;
+ }
+ 
+ void wm_window_swap_buffer_release(wmWindow *win)
+diff --git a/source/blender/windowmanager/wm_window.hh b/source/blender/windowmanager/wm_window.hh
+index 9dad8957..515d2ddc 100644
+--- a/source/blender/windowmanager/wm_window.hh
++++ b/source/blender/windowmanager/wm_window.hh
+@@ -114,7 +114,7 @@ void wm_window_set_size(wmWindow *win, int width, int height);
+ /**
+  * \brief Push rendered buffer to the screen.
+  */
+-void wm_window_swap_buffer_acquire(wmWindow *win);
++bool wm_window_swap_buffer_acquire(wmWindow *win);
+ void wm_window_swap_buffer_release(wmWindow *win);
+ void wm_window_set_swap_interval(wmWindow *win, int interval);
+ bool wm_window_get_swap_interval(wmWindow *win, int *r_interval);

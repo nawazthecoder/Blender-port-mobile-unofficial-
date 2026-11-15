@@ -1,0 +1,131 @@
+diff --git a/build_files/android/apk/app/build.gradle b/build_files/android/apk/app/build.gradle
+index cadbfae4..a23f60e6 100644
+--- a/build_files/android/apk/app/build.gradle
++++ b/build_files/android/apk/app/build.gradle
+@@ -25,7 +25,7 @@ android {
+     minSdk 31
+     targetSdk 34
+     versionCode 1
+-    versionName '5.2.3-android.1'
++    versionName '5.2.3-android.2'
+     ndk { abiFilters 'arm64-v8a' }
+   }
+ 
+diff --git a/build_files/android/apk/package.sh b/build_files/android/apk/package.sh
+index 5b929cdf..b0ac1df9 100755
+--- a/build_files/android/apk/package.sh
++++ b/build_files/android/apk/package.sh
+@@ -377,7 +377,7 @@ fi
+   "$STAGE/rescompiled/res.zip" \
+   -A "$ASSETS" -0 zip \
+   --min-sdk-version "$ANDROID_API" --target-sdk-version "$ANDROID_TARGET_API" \
+-  --version-code 5020301 --version-name "5.2.3-android.1"
++  --version-code 5020302 --version-name "5.2.3-android.2"
+ 
+ echo "[apk] assembling"
+ cp "$STAGE/base.apk" "$OUT"
+diff --git a/build_files/android/build_apk.sh b/build_files/android/build_apk.sh
+index b8ca82bc..7eece6ac 100755
+--- a/build_files/android/build_apk.sh
++++ b/build_files/android/build_apk.sh
+@@ -35,6 +35,10 @@ ADRENOTOOLS_ARGS=()
+ OIDN_ARGS=()
+ [ -z "${BLENDER_ANDROID_OIDN_ROOT:-}" ] || OIDN_ARGS=(-DANDROID_OIDN_ROOT="$BLENDER_ANDROID_OIDN_ROOT")
+ FEATURES="build_files/android/android_features_$CONFIG.cmake"
++LAUNCHER_ARGS=()
++if command -v ccache >/dev/null 2>&1; then
++  LAUNCHER_ARGS=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
++fi
+ 
+ # A CMake build dir records its own absolute path; if it was moved, cmake refuses
+ # to reconfigure. Wipe a relocated cache so the configure below regenerates it.
+@@ -50,24 +54,25 @@ drop_stale_cache "$HOST"
+ drop_stale_cache "$BUILD"
+ 
+ echo "=== [$CONFIG] host codegen tools ==="
+-if [ ! -x "$HOST/bin/makesdna" ]; then
++{ # Always refresh generators after source or feature changes.
+   # Only the code generators are wanted here, so keep the GUI out: on Linux a
+   # full configure demands X11 development packages that nothing here uses.
+   # The feature set must otherwise match the target, or makesrna emits a
+   # different set of files than the target build expects. So TBB stays on
+   # and gets an rpath: Linux does not bake the library path into the
+   # executable the way macOS does, and the generator would not start.
+-  cmake -S . -B "$HOST" -G Ninja -C "$FEATURES" -DWITH_CROSSCOMPILED_TOOLS=OFF \
++  cmake -S . -B "$HOST" -G Ninja "${LAUNCHER_ARGS[@]}" -C "$FEATURES" -DWITH_CROSSCOMPILED_TOOLS=OFF -DCMAKE_BUILD_TYPE=Release \
+     -DCMAKE_C_COMPILER="$ANDROID_HOST_CC" -DCMAKE_CXX_COMPILER="$ANDROID_HOST_CXX" \
+     -DWITH_HEADLESS=ON -DWITH_X11_XINPUT=OFF -DWITH_AUDASPACE=OFF \
+     -DCMAKE_BUILD_RPATH="$REPO_ROOT/lib/linux_x64/tbb/lib"
+   ninja -j "${BLENDER_BUILD_JOBS:-2}" -C "$HOST" makesdna makesrna datatoc msgfmt shader_tool
+-fi
++}
+ 
+ echo "=== [$CONFIG] configure + build libblender.so ==="
+ # The nested host_tools sub-build gets no toolchain file and would otherwise
+ # fall back to the system default cc, which is below the minimum Blender takes.
+-cmake -S . -B "$BUILD" -G Ninja \
++cmake -S . -B "$BUILD" -G Ninja "${LAUNCHER_ARGS[@]}" \
++  -DCMAKE_BUILD_TYPE=Release \
+   -DCMAKE_TOOLCHAIN_FILE="$ANDROID_TOOLCHAIN_FILE" \
+   -DANDROID_ABI="$ANDROID_ABI" -DANDROID_PLATFORM="android-$ANDROID_API" \
+   -DHOST_C_COMPILER="$ANDROID_HOST_CC" -DHOST_CXX_COMPILER="$ANDROID_HOST_CXX" \
+diff --git a/build_files/android/env.sh b/build_files/android/env.sh
+index 8b26d339..06481673 100644
+--- a/build_files/android/env.sh
++++ b/build_files/android/env.sh
+@@ -26,8 +26,10 @@ export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_HOME_DEFAULT}"
+ # Matched to whatever built lib/android_arm64: those libraries are clang 21,
+ # and libc++ symbols they reference (__hash_memory) do not exist in the r28
+ # runtime, so the app dies in dlopen before reaching any Blender code.
+-export ANDROID_NDK_VERSION="${ANDROID_NDK_VERSION:-30.0.14904198-beta1}"
+-export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION}"
++export ANDROID_NDK_VERSION="${ANDROID_NDK_VERSION:-30.0.16248370}"
++# CI images may export ANDROID_NDK_ROOT for an unrelated preinstalled revision.
++# The version selected for the Android dependency ABI always wins.
++export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+ export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
+ 
+ # JDK (keg-only Homebrew openjdk) — needed for sdkmanager/adb wrappers.
+diff --git a/build_files/cmake/host_tools.cmake b/build_files/cmake/host_tools.cmake
+index b115a70a..20aeca3e 100644
+--- a/build_files/cmake/host_tools.cmake
++++ b/build_files/cmake/host_tools.cmake
+@@ -13,6 +13,20 @@
+ # variables are also  exposed to allow for consumer targets to depend on the host_tools
+ # target, as the tool targets do not exist in the cross-compile case.
+ 
++# Android's build driver already builds config-matched native generators. Reuse
++# their imported targets rather than configuring and compiling the same tools twice.
++if(ANDROID AND CMAKE_CROSSCOMPILING)
++  foreach(_tool makesdna makesrna datatoc shader_tool msgfmt)
++    if(NOT TARGET ${_tool})
++      message(FATAL_ERROR "Missing Android host generator target: ${_tool}")
++    endif()
++    string(TOUPPER ${_tool} _tool_upper)
++    set(${_tool_upper}_EXECUTABLE "${CROSSCOMPILE_TOOLDIR}/${_tool}")
++    set(${_tool_upper}_DEPENDENCY ${_tool})
++  endforeach()
++  return()
++endif()
++
+ if(CMAKE_CROSSCOMPILING)
+   include(ExternalProject)
+ 
+diff --git a/build_files/cmake/platform/platform_android.cmake b/build_files/cmake/platform/platform_android.cmake
+index d8a9084b..f610d698 100644
+--- a/build_files/cmake/platform/platform_android.cmake
++++ b/build_files/cmake/platform/platform_android.cmake
+@@ -368,10 +368,9 @@ if(WITH_VULKAN_BACKEND)
+   find_package_wrapper(ShaderC REQUIRED)
+ endif()
+ 
+-# WITH_EMBREE, not WITH_CYCLES_EMBREE: blenkernel uses Embree for mesh ray
+-# casts independently of Cycles, so a build with Cycles off still needs the
+-# headers. Every other platform gates it this way.
+-if(WITH_EMBREE)
++# Blender 5.2 gates Embree through Cycles, unlike 5.3's global WITH_EMBREE.
++if(WITH_CYCLES AND WITH_CYCLES_EMBREE)
++  set(EMBREE_ROOT_DIR ${LIBDIR}/embree)
+   find_package(Embree 4.0.0 REQUIRED)
+ endif()
+ 

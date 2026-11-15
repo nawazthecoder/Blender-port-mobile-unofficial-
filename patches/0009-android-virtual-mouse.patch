@@ -1,0 +1,1064 @@
+diff --git a/build_files/android/BUILDING.md b/build_files/android/BUILDING.md
+index 3b5b0ac7..4aad5cad 100644
+--- a/build_files/android/BUILDING.md
++++ b/build_files/android/BUILDING.md
+@@ -367,8 +367,8 @@ extension's declared license as it packs it.
+ **adb:**
+ ```bash
+ adb install -r ../blender_build_android/android_apk_stage_full/blender-full.apk
+-adb shell am start -n org.blender.blender/.BlenderActivity
+-adb logcat --pid=$(adb shell pidof org.blender.blender)
++adb shell am start -n org.blender.androidport/org.blender.blender.BlenderActivity
++adb logcat --pid=$(adb shell pidof org.blender.androidport)
+ ```
+ 
+ **Android Studio (Run/Debug):** run `package.sh` once (to stage libs+assets),
+diff --git a/build_files/android/apk/app/build.gradle b/build_files/android/apk/app/build.gradle
+index 26283c8c..2355a548 100644
+--- a/build_files/android/apk/app/build.gradle
++++ b/build_files/android/apk/app/build.gradle
+@@ -21,11 +21,11 @@ android {
+   ndkVersion '28.2.13676358'
+ 
+   defaultConfig {
+-    applicationId 'org.blender.blender'
++    applicationId 'org.blender.androidport'
+     minSdk 31
+     targetSdk 34
+-    versionCode 5020308
+-    versionName '5.2.3-android.8'
++    versionCode 5020309
++    versionName '5.2.3-android.9'
+     ndk { abiFilters 'arm64-v8a' }
+   }
+ 
+diff --git a/build_files/android/apk/app/src/main/AndroidManifest.xml b/build_files/android/apk/app/src/main/AndroidManifest.xml
+index cb60da83..c3f12120 100644
+--- a/build_files/android/apk/app/src/main/AndroidManifest.xml
++++ b/build_files/android/apk/app/src/main/AndroidManifest.xml
+@@ -2,7 +2,7 @@
+ <!-- SPDX-FileCopyrightText: 2026 Blender Authors
+      SPDX-License-Identifier: GPL-2.0-or-later -->
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+-    package="org.blender.blender">
++    package="org.blender.androidport">
+ 
+     <!-- Vulkan is used at runtime; not required so it installs on emulators too. -->
+     <uses-feature android:name="android.hardware.vulkan.version"
+@@ -17,7 +17,7 @@
+     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+ 
+     <application
+-        android:label="Blender"
++        android:label="Blender Android"
+         android:icon="@mipmap/ic_launcher"
+         android:roundIcon="@mipmap/ic_launcher_round"
+         android:hasCode="true"
+@@ -34,7 +34,7 @@
+              With it, a .blend tapped while Blender runs arrives at onNewIntent. -->
+         <activity
+             android:name="org.blender.blender.BlenderActivity"
+-            android:label="Blender"
++            android:label="Blender Android"
+             android:launchMode="singleTask"
+             android:screenOrientation="sensorLandscape"
+             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|screenLayout|density|navigation|uiMode"
+@@ -51,7 +51,7 @@
+                  dotted paths. host="*" is required, or the path is never checked and
+                  every content:// URI matches. No file:// filter: file managers send
+                  content:// since API 24, and file:// has no host to match. -->
+-            <intent-filter android:label="Blender">
++            <intent-filter android:label="Blender Android">
+                 <action android:name="android.intent.action.VIEW" />
+                 <action android:name="android.intent.action.EDIT" />
+                 <category android:name="android.intent.category.DEFAULT" />
+@@ -61,7 +61,7 @@
+ 
+             <!-- Same, for intents with no type at all. A typed filter never matches an
+                  untyped intent, and file managers usually send no type for .blend. -->
+-            <intent-filter android:label="Blender">
++            <intent-filter android:label="Blender Android">
+                 <action android:name="android.intent.action.VIEW" />
+                 <action android:name="android.intent.action.EDIT" />
+                 <category android:name="android.intent.category.DEFAULT" />
+@@ -73,7 +73,7 @@
+                  extension to match. pathPrefix keeps this to the non-media tables so
+                  images, video and music never offer Blender; other non-media files will,
+                  which is the price of being reachable from those file managers. -->
+-            <intent-filter android:label="Blender">
++            <intent-filter android:label="Blender Android">
+                 <action android:name="android.intent.action.VIEW" />
+                 <action android:name="android.intent.action.EDIT" />
+                 <category android:name="android.intent.category.DEFAULT" />
+diff --git a/build_files/android/apk/package.sh b/build_files/android/apk/package.sh
+index c93a48b9..bc5a6e2c 100755
+--- a/build_files/android/apk/package.sh
++++ b/build_files/android/apk/package.sh
+@@ -378,7 +378,7 @@ fi
+   "$STAGE/rescompiled/res.zip" \
+   -A "$ASSETS" -0 zip \
+   --min-sdk-version "$ANDROID_API" --target-sdk-version "$ANDROID_TARGET_API" \
+-  --version-code 5020308 --version-name "5.2.3-android.8"
++  --version-code 5020309 --version-name "5.2.3-android.9"
+ 
+ echo "[apk] assembling"
+ cp "$STAGE/base.apk" "$OUT"
+diff --git a/build_files/android/build.py b/build_files/android/build.py
+index 3e769005..e30cbcb2 100755
+--- a/build_files/android/build.py
++++ b/build_files/android/build.py
+@@ -30,8 +30,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
+ REPO_ROOT = SCRIPT_DIR.parent.parent
+ BUILD_BASE = REPO_ROOT.parent / "blender_build_android"
+ 
+-PACKAGE = "org.blender.blender"
+-ACTIVITY = f"{PACKAGE}/.BlenderActivity"
++PACKAGE = "org.blender.androidport"
++ACTIVITY = f"{PACKAGE}/org.blender.blender.BlenderActivity"
+ 
+ # Pinned so a validation run is reproducible; bump deliberately.
+ VVL_VERSION = "1.4.357.0"
+diff --git a/build_files/android/fastdeploy.sh b/build_files/android/fastdeploy.sh
+index 5aa48d76..b973b7f2 100755
+--- a/build_files/android/fastdeploy.sh
++++ b/build_files/android/fastdeploy.sh
+@@ -59,6 +59,6 @@ fi
+ 
+ echo "=== install + launch ==="
+ "$ADB" install -r "$OUT"
+-"$ADB" shell am force-stop org.blender.blender
+-"$ADB" shell am start -n org.blender.blender/.BlenderActivity
++"$ADB" shell am force-stop org.blender.androidport
++"$ADB" shell am start -n org.blender.androidport/org.blender.blender.BlenderActivity
+ echo "=== deployed ($CONFIG) ==="
+diff --git a/intern/ghost/GHOST_AndroidVirtualMouse.hh b/intern/ghost/GHOST_AndroidVirtualMouse.hh
+new file mode 100644
+index 00000000..d3666979
+--- /dev/null
++++ b/intern/ghost/GHOST_AndroidVirtualMouse.hh
+@@ -0,0 +1,393 @@
++/* SPDX-FileCopyrightText: 2026 Blender Authors
++ * SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++
++#include <algorithm>
++#include <array>
++#include <cmath>
++#include <cstdint>
++#include <functional>
++#include <utility>
++
++/* Platform-independent touch state machine. Coordinates use GHOST's top-left origin.
++ * A stream is owned from its first DOWN to its final UP, including when Close is pressed. */
++namespace ghost::virtual_mouse {
++struct Rect {
++  float left = 0, top = 0, right = 0, bottom = 0;
++  bool contains(float x, float y) const
++  {
++    return x >= left && x < right && y >= top && y < bottom;
++  }
++  bool intersects(const Rect &b) const
++  {
++    return left < b.right && right > b.left && top < b.bottom && bottom > b.top;
++  }
++};
++enum Control { Move, Left, Middle, Right, Hold, WheelDown, WheelUp, Close, ControlCount };
++enum class Kind { Motion, ButtonDown, ButtonUp, Wheel };
++struct Event {
++  Kind kind;
++  int x, y;
++  int button = 0; /* Left = 1, Middle = 2, Right = 4. */
++  int delta = 0;
++};
++struct Point {
++  int id;
++  float x, y;
++};
++struct State {
++  bool enabled = false;
++  bool hold_armed = false;
++  int held = 0, latched = 0;
++  float x = 0, y = 0, scale = 1;
++  Rect panel;
++  std::array<Rect, ControlCount> controls;
++};
++
++class Controller {
++ public:
++  explicit Controller(std::function<void(const Event &)> emit) : emit_(std::move(emit)) {}
++  const State &state() const { return state_; }
++  bool capturing() const { return captured_; }
++
++  void set_viewport(int width, int height, float scale)
++  {
++    width = std::max(1, width);
++    height = std::max(1, height);
++    scale = std::clamp(scale, 0.65f, 3.0f);
++    if (width == width_ && height == height_ && scale == state_.scale) {
++      return;
++    }
++    cancel(true);
++    width_ = width;
++    height_ = height;
++    state_.scale = scale;
++    if (!positioned_) {
++      state_.x = width * 0.5f;
++      state_.y = height * 0.5f;
++      state_.panel.left = width * 0.5f - panel_width() * 0.5f;
++      state_.panel.top = 38 * scale;
++      positioned_ = true;
++    }
++    sync_cursor(state_.x, state_.y);
++    layout();
++  }
++  void set_keyboard_rect(Rect rect)
++  {
++    keyboard_ = rect;
++    layout();
++    const float old_x = state_.x, old_y = state_.y;
++    sync_cursor(state_.x, state_.y);
++    if (state_.enabled && (old_x != state_.x || old_y != state_.y)) {
++      motion();
++    }
++  }
++  void sync_cursor(float x, float y)
++  {
++    state_.x = std::clamp(x, 0.0f, float(width_ - 1));
++    state_.y = std::clamp(y, 0.0f, float(height_ - 1));
++    if (state_.enabled && keyboard_.contains(state_.x, state_.y)) {
++      /* Keyboard keys use direct touch. Never let its event filter swallow the release of a
++       * mouse drag that began in an editor. Snap to the closest visible edge of the keyboard. */
++      float distance = float(width_ + height_);
++      float target_x = state_.x, target_y = state_.y;
++      const auto candidate = [&](float px, float py) {
++        if (px < 0 || py < 0 || px >= width_ || py >= height_ || keyboard_.contains(px, py)) {
++          return;
++        }
++        const float d = std::hypot(px - state_.x, py - state_.y);
++        if (d < distance) {
++          distance = d;
++          target_x = px;
++          target_y = py;
++        }
++      };
++      candidate(keyboard_.left - 1, state_.y);
++      candidate(keyboard_.right, state_.y);
++      candidate(state_.x, keyboard_.top - 1);
++      candidate(state_.x, keyboard_.bottom);
++      state_.x = target_x;
++      state_.y = target_y;
++    }
++  }
++  void set_enabled(bool enabled)
++  {
++    if (state_.enabled == enabled) {
++      return;
++    }
++    cancel(true);
++    state_.enabled = enabled;
++    if (enabled) {
++      sync_cursor(state_.x, state_.y);
++      motion();
++    }
++  }
++  /* Keep ownership until UP when a surface changes or the user closes the bar mid-gesture. */
++  void cancel(bool keep_capture = false)
++  {
++    touches_ = {};
++    state_.latched = 0;
++    state_.hold_armed = false;
++    sync_buttons();
++    wheel_remainder_ = 0;
++    suppressed_ = captured_ && keep_capture;
++    captured_ = suppressed_;
++  }
++  bool begin(int id, float x, float y, uint64_t time)
++  {
++    if (captured_) {
++      cancel();
++    }
++    touches_ = {};
++    wheel_remainder_ = 0;
++    if (!state_.enabled || keyboard_.contains(x, y)) {
++      return false;
++    }
++    captured_ = true;
++    add(id, x, y, time);
++    return true;
++  }
++  void pointer_down(int id, float x, float y, uint64_t time)
++  {
++    if (!captured_ || suppressed_) {
++      return;
++    }
++    for (Touch &touch : touches_) {
++      touch.tap = false;
++    }
++    add(id, x, y, time);
++    for (Touch &touch : touches_) {
++      touch.tap = false;
++    }
++    wheel_remainder_ = 0;
++  }
++  void move(const Point *points, int count)
++  {
++    if (!captured_ || suppressed_) {
++      return;
++    }
++    int pads = 0;
++    float dx = 0, dy = 0;
++    bool primary = false;
++    for (Touch &touch : touches_) {
++      if (!touch.active) {
++        continue;
++      }
++      for (int i = 0; i < count; i++) {
++        if (points[i].id != touch.id) {
++          continue;
++        }
++        const float mx = points[i].x - touch.x;
++        const float my = points[i].y - touch.y;
++        touch.x = points[i].x;
++        touch.y = points[i].y;
++        if (std::hypot(touch.x - touch.start_x, touch.y - touch.start_y) > 6 * state_.scale) {
++          touch.tap = false;
++        }
++        if (touch.role == Role::Pad) {
++          pads++;
++          /* The first live pad controls dragging, irrespective of Android's pointer indices. */
++          if (!primary || state_.held == 0) {
++            dx += mx;
++            dy += my;
++          }
++          primary = true;
++        }
++        else if (touch.role == Role::Grip) {
++          state_.panel.left += mx;
++          state_.panel.top += my;
++          layout();
++        }
++        break;
++      }
++    }
++    if (pads >= 2 && state_.held == 0) {
++      for (Touch &touch : touches_) {
++        touch.tap = false;
++      }
++      wheel_remainder_ += dy / pads;
++      const float step = 32 * state_.scale;
++      /* Android finger-down motion scrolls content down: send a positive wheel notch. */
++      while (std::abs(wheel_remainder_) >= step) {
++        const int delta = wheel_remainder_ > 0 ? 1 : -1;
++        wheel(delta);
++        wheel_remainder_ -= delta * step;
++      }
++    }
++    else if (pads > 0 && (dx != 0 || dy != 0)) {
++      sync_cursor(state_.x + dx, state_.y + dy);
++      motion();
++    }
++  }
++  void pointer_up(int id, uint64_t time, bool final)
++  {
++    if (!captured_) {
++      return;
++    }
++    for (Touch &touch : touches_) {
++      if (!touch.active || touch.id != id) {
++        continue;
++      }
++      const bool click = !suppressed_ && touch.role == Role::Pad && touch.tap &&
++                         time - touch.time <= 300 && state_.held == 0;
++      touch.active = false;
++      sync_buttons();
++      if (click && !state_.panel.contains(state_.x, state_.y)) {
++        motion();
++        emit_({Kind::ButtonDown, int(state_.x), int(state_.y), 1});
++        emit_({Kind::ButtonUp, int(state_.x), int(state_.y), 1});
++      }
++      break;
++    }
++    wheel_remainder_ = 0;
++    if (final) {
++      touches_ = {};
++      sync_buttons(); /* Latched buttons deliberately survive lifting the last finger. */
++      captured_ = suppressed_ = false;
++    }
++  }
++
++ private:
++  enum class Role { Pad, Button, Grip, Ignore };
++  struct Touch {
++    bool active = false, tap = false;
++    int id = -1, button = 0;
++    Role role = Role::Ignore;
++    float x = 0, y = 0, start_x = 0, start_y = 0;
++    uint64_t time = 0;
++  };
++  State state_;
++  Rect keyboard_;
++  std::array<Touch, 10> touches_{};
++  std::function<void(const Event &)> emit_;
++  int width_ = 1, height_ = 1;
++  bool captured_ = false, suppressed_ = false, positioned_ = false;
++  float wheel_remainder_ = 0;
++
++  float panel_width() const { return std::min(float(width_), 432 * state_.scale); }
++  void layout()
++  {
++    const float w = panel_width(), h = std::min(float(height_), 52 * state_.scale);
++    state_.panel.left = std::clamp(state_.panel.left, 0.0f, float(width_) - w);
++    state_.panel.top = std::clamp(state_.panel.top, 0.0f, float(height_) - h);
++    state_.panel.right = state_.panel.left + w;
++    state_.panel.bottom = state_.panel.top + h;
++    if (state_.panel.intersects(keyboard_)) {
++      if (keyboard_.top >= h) {
++        state_.panel.top = keyboard_.top - h;
++      }
++      else if (keyboard_.bottom + h <= height_) {
++        state_.panel.top = keyboard_.bottom;
++      }
++      state_.panel.bottom = state_.panel.top + h;
++    }
++    for (int i = 0; i < ControlCount; i++) {
++      state_.controls[i] = {state_.panel.left + w * i / float(ControlCount),
++                            state_.panel.top,
++                            state_.panel.left + w * (i + 1) / float(ControlCount),
++                            state_.panel.bottom};
++    }
++  }
++  void motion() { emit_({Kind::Motion, int(state_.x), int(state_.y)}); }
++  void wheel(int delta)
++  {
++    if (!state_.panel.contains(state_.x, state_.y)) {
++      motion();
++      emit_({Kind::Wheel, int(state_.x), int(state_.y), 0, delta});
++    }
++  }
++  void sync_buttons()
++  {
++    int next = state_.latched;
++    for (const Touch &touch : touches_) {
++      if (touch.active && touch.role == Role::Button) {
++        next |= touch.button;
++      }
++    }
++    if (next == state_.held) {
++      return;
++    }
++    motion();
++    for (int button : {1, 2, 4}) {
++      if ((state_.held & button) && !(next & button)) {
++        emit_({Kind::ButtonUp, int(state_.x), int(state_.y), button});
++      }
++    }
++    for (int button : {1, 2, 4}) {
++      if ((next & button) && !(state_.held & button)) {
++        emit_({Kind::ButtonDown, int(state_.x), int(state_.y), button});
++      }
++    }
++    state_.held = next;
++  }
++  void add(int id, float x, float y, uint64_t time)
++  {
++    Touch *slot = nullptr;
++    for (Touch &touch : touches_) {
++      if (!touch.active) {
++        slot = &touch;
++        break;
++      }
++    }
++    if (!slot) {
++      return;
++    }
++    *slot = {true, true, id, 0, Role::Pad, x, y, x, y, time};
++    if (keyboard_.contains(x, y)) {
++      slot->role = Role::Ignore;
++      slot->tap = false;
++      return;
++    }
++    for (int i = 0; i < ControlCount; i++) {
++      if (!state_.controls[i].contains(x, y)) {
++        continue;
++      }
++      slot->tap = false;
++      slot->role = Role::Ignore;
++      if (i == Move) {
++        slot->role = Role::Grip;
++      }
++      else if (i >= Left && i <= Right && !state_.panel.contains(state_.x, state_.y)) {
++        const int button = 1 << (i - Left);
++        if (state_.latched & button) {
++          state_.latched &= ~button;
++        }
++        else if (state_.hold_armed) {
++          state_.latched |= button;
++          state_.hold_armed = false;
++        }
++        else {
++          slot->role = Role::Button;
++          slot->button = button;
++        }
++        sync_buttons();
++      }
++      else if (i == Hold) {
++        if (state_.latched) {
++          state_.latched = 0;
++          state_.hold_armed = false;
++          sync_buttons();
++        }
++        else {
++          state_.hold_armed = !state_.hold_armed;
++        }
++      }
++      else if (i == WheelDown || i == WheelUp) {
++        wheel(i == WheelUp ? 1 : -1);
++      }
++      else if (i == Close) {
++        set_enabled(false);
++      }
++      return;
++    }
++    /* A pad that begins while a button is held moves only; lifting must never add a click. */
++    slot->tap = state_.held == 0;
++  }
++};
++}  // namespace ghost::virtual_mouse
++
++#ifdef __ANDROID__
++void GHOST_android_virtual_mouse_set_enabled(bool enabled);
++void GHOST_android_virtual_mouse_get_state(ghost::virtual_mouse::State *state);
++void GHOST_android_virtual_mouse_set_keyboard_rect(ghost::virtual_mouse::Rect rect);
++#endif
+diff --git a/intern/ghost/intern/GHOST_SystemAndroid.cc b/intern/ghost/intern/GHOST_SystemAndroid.cc
+index 51c99287..c516edc9 100644
+--- a/intern/ghost/intern/GHOST_SystemAndroid.cc
++++ b/intern/ghost/intern/GHOST_SystemAndroid.cc
+@@ -53,7 +53,10 @@ static constexpr int32_t TOUCH_LONG_PRESS_MOVE_PX = 16;
+ static constexpr float GESTURE_DECIDE_PX = 24.0f;
+ 
+ GHOST_SystemAndroid::GHOST_SystemAndroid()
+-    : app_(g_android_app),
++    : virtual_mouse_([this](const ghost::virtual_mouse::Event &event) {
++        dispatchVirtualMouseEvent(event);
++      }),
++      app_(g_android_app),
+       window_(nullptr),
+       meta_state_(0),
+       cursor_x_(0),
+@@ -229,6 +232,9 @@ void GHOST_SystemAndroid::handleNativeWindowInit(android_app *app)
+ 
+ void GHOST_SystemAndroid::handleWindowFocus(bool gained)
+ {
++  if (!gained) {
++    virtual_mouse_.cancel(true);
++  }
+   if (!window_) {
+     return;
+   }
+@@ -250,6 +256,7 @@ void GHOST_SystemAndroid::handleWindowFocus(bool gained)
+ 
+ void GHOST_SystemAndroid::handleNativeWindowResize()
+ {
++  virtual_mouse_.cancel(true);
+   if (!window_ || !app_ || !app_->window) {
+     return;
+   }
+@@ -267,6 +274,7 @@ void GHOST_SystemAndroid::handleNativeWindowResize()
+ 
+ void GHOST_SystemAndroid::handleNativeWindowTerm()
+ {
++  virtual_mouse_.cancel(true);
+   __android_log_print(
+       ANDROID_LOG_INFO, "blender-surface", "TERM_WINDOW ghost_window=%p", (void *)window_);
+   if (window_) {
+@@ -318,6 +326,71 @@ int32_t GHOST_SystemAndroid::handleMotionEvent(AInputEvent *event)
+   const int32_t tool_type = count > 0 ? AMotionEvent_getToolType(event, 0) :
+                                         AMOTION_EVENT_TOOL_TYPE_UNKNOWN;
+ 
++  /* Physical pointing devices retain their own absolute coordinates and tablet pressure. */
++  if (tool_type == AMOTION_EVENT_TOOL_TYPE_MOUSE ||
++      tool_type == AMOTION_EVENT_TOOL_TYPE_STYLUS || tool_type == AMOTION_EVENT_TOOL_TYPE_ERASER)
++  {
++    if (virtual_mouse_.state().enabled || virtual_mouse_.capturing()) {
++      virtual_mouse_.set_enabled(false);
++      virtual_mouse_.cancel();
++      pushEvent(std::make_unique<GHOST_Event>(
++          getMilliSeconds(), GHOST_kEventWindowUpdate, window_));
++    }
++  }
++  else if (virtual_mouse_.state().enabled || virtual_mouse_.capturing()) {
++    using namespace ghost::virtual_mouse;
++    updateVirtualMouseViewport();
++    const int index = (AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK) >>
++                      AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
++    const uint64_t time = getMilliSeconds();
++    if (action == AMOTION_EVENT_ACTION_DOWN && count > 0) {
++      if (virtual_mouse_.begin(AMotionEvent_getPointerId(event, 0),
++                               ghost_android_scale_input(AMotionEvent_getX(event, 0)),
++                               ghost_android_scale_input(AMotionEvent_getY(event, 0)), time))
++      {
++        touchCancelPending();
++        touchEndPan();
++        gesture_active_ = false;
++        hover_exit_pending_ = false;
++      }
++      /* A stream starting on the on-screen keyboard stays on the existing keyboard path. */
++    }
++    else if (virtual_mouse_.capturing()) {
++      if (action == AMOTION_EVENT_ACTION_POINTER_DOWN && index < int(count)) {
++        virtual_mouse_.pointer_down(AMotionEvent_getPointerId(event, index),
++                                    ghost_android_scale_input(AMotionEvent_getX(event, index)),
++                                    ghost_android_scale_input(AMotionEvent_getY(event, index)), time);
++      }
++      else if (action == AMOTION_EVENT_ACTION_MOVE) {
++        std::array<Point, 10> points;
++        const int n = std::min(int(count), int(points.size()));
++        for (int i = 0; i < n; i++) {
++          points[i] = {AMotionEvent_getPointerId(event, i),
++                        ghost_android_scale_input(AMotionEvent_getX(event, i)),
++                        ghost_android_scale_input(AMotionEvent_getY(event, i))};
++        }
++        virtual_mouse_.move(points.data(), n);
++      }
++      else if (action == AMOTION_EVENT_ACTION_UP || action == AMOTION_EVENT_ACTION_POINTER_UP) {
++        if (index < int(count)) {
++          virtual_mouse_.pointer_up(AMotionEvent_getPointerId(event, index), time,
++                                     action == AMOTION_EVENT_ACTION_UP);
++        }
++        pushEvent(std::make_unique<GHOST_Event>(time, GHOST_kEventWindowUpdate, window_));
++        return 1; /* Even Close must consume the final UP of the stream it owned. */
++      }
++      else if (action == AMOTION_EVENT_ACTION_CANCEL) {
++        virtual_mouse_.cancel();
++        pushEvent(std::make_unique<GHOST_Event>(time, GHOST_kEventWindowUpdate, window_));
++        return 1;
++      }
++    }
++    if (virtual_mouse_.capturing()) {
++      pushEvent(std::make_unique<GHOST_Event>(time, GHOST_kEventWindowUpdate, window_));
++      return 1;
++    }
++  }
++
+   /* A physical/Bluetooth mouse must not go through the delayed finger-touch path: Blender relies
+    * on the middle button for viewport orbit and on the right button for context menus. */
+   if (tool_type == AMOTION_EVENT_TOOL_TYPE_MOUSE) {
+@@ -864,6 +937,17 @@ GHOST_TSuccess GHOST_SystemAndroid::getModifierKeys(GHOST_ModifierKeys &keys) co
+ GHOST_TSuccess GHOST_SystemAndroid::getButtons(GHOST_Buttons &buttons) const
+ {
+   buttons = buttons_;
++  /* Direct touches on the keyboard may temporarily use Left without owning the virtual drag. */
++  const int held = virtual_mouse_.state().held;
++  if (held & 1) {
++    buttons.set(GHOST_kButtonMaskLeft, true);
++  }
++  if (held & 2) {
++    buttons.set(GHOST_kButtonMaskMiddle, true);
++  }
++  if (held & 4) {
++    buttons.set(GHOST_kButtonMaskRight, true);
++  }
+   return GHOST_kSuccess;
+ }
+ 
+@@ -973,10 +1057,101 @@ GHOST_TSuccess GHOST_SystemAndroid::getCursorPosition(int32_t &x, int32_t &y) co
+   return GHOST_kSuccess;
+ }
+ 
+-GHOST_TSuccess GHOST_SystemAndroid::setCursorPosition(int32_t /*x*/, int32_t /*y*/)
++GHOST_TSuccess GHOST_SystemAndroid::setCursorPosition(int32_t x, int32_t y)
++{
++  if (!virtual_mouse_.state().enabled) {
++    return GHOST_kFailure;
++  }
++  virtual_mouse_.sync_cursor(x, y);
++  cursor_x_ = int32_t(virtual_mouse_.state().x);
++  cursor_y_ = int32_t(virtual_mouse_.state().y);
++  return GHOST_kSuccess;
++}
++
++void GHOST_SystemAndroid::updateVirtualMouseViewport()
++{
++  if (window_) {
++    GHOST_Rect bounds;
++    window_->getClientBounds(bounds);
++    virtual_mouse_.set_viewport(bounds.getWidth(), bounds.getHeight(),
++                                std::max(1.0f, float(getDPIHint()) / 160.0f));
++  }
++}
++
++void GHOST_SystemAndroid::setVirtualMouseEnabled(bool enabled)
+ {
+-  /* Touch input has no warpable cursor. */
+-  return GHOST_kFailure;
++  updateVirtualMouseViewport();
++  if (enabled && !virtual_mouse_.state().enabled) {
++    touchCancelPending();
++    touchEndPan();
++    gesture_active_ = false;
++    hover_exit_pending_ = false;
++    virtual_mouse_.sync_cursor(cursor_x_, cursor_y_);
++  }
++  virtual_mouse_.set_enabled(enabled);
++}
++
++const ghost::virtual_mouse::State &GHOST_SystemAndroid::getVirtualMouseState()
++{
++  /* Drawing can be the first activity after rotation, before another touch arrives. */
++  updateVirtualMouseViewport();
++  return virtual_mouse_.state();
++}
++
++void GHOST_SystemAndroid::setVirtualMouseKeyboardRect(ghost::virtual_mouse::Rect rect)
++{
++  virtual_mouse_.set_keyboard_rect(rect);
++}
++
++void GHOST_SystemAndroid::dispatchVirtualMouseEvent(const ghost::virtual_mouse::Event &event)
++{
++  if (!window_) {
++    return;
++  }
++  using ghost::virtual_mouse::Kind;
++  const uint64_t time = getMilliSeconds();
++  if (event.kind == Kind::Motion) {
++    cursor_x_ = event.x;
++    cursor_y_ = event.y;
++    pushEvent(std::make_unique<GHOST_EventCursor>(
++        time, GHOST_kEventCursorMove, window_, event.x, event.y, GHOST_TABLET_DATA_NONE));
++  }
++  else if (event.kind == Kind::Wheel) {
++    pushEvent(std::make_unique<GHOST_EventWheel>(
++        time, window_, GHOST_kEventWheelAxisVertical, event.delta));
++  }
++  else {
++    const GHOST_TButton button = event.button == 1 ? GHOST_kButtonMaskLeft :
++                                event.button == 2 ? GHOST_kButtonMaskMiddle :
++                                                    GHOST_kButtonMaskRight;
++    const bool down = event.kind == Kind::ButtonDown;
++    buttons_.set(button, down);
++    pushEvent(std::make_unique<GHOST_EventButton>(time,
++        down ? GHOST_kEventButtonDown : GHOST_kEventButtonUp,
++        window_, button, GHOST_TABLET_DATA_NONE));
++  }
++}
++
++void GHOST_android_virtual_mouse_set_enabled(bool enabled)
++{
++  auto *system = static_cast<GHOST_SystemAndroid *>(GHOST_ISystem::getSystem());
++  if (system) {
++    system->setVirtualMouseEnabled(enabled);
++  }
++}
++
++void GHOST_android_virtual_mouse_get_state(ghost::virtual_mouse::State *state)
++{
++  auto *system = static_cast<GHOST_SystemAndroid *>(GHOST_ISystem::getSystem());
++  *state = system ? system->getVirtualMouseState() : ghost::virtual_mouse::State{};
++}
++
++void GHOST_android_virtual_mouse_set_keyboard_rect(ghost::virtual_mouse::Rect rect)
++{
++  auto *system = static_cast<GHOST_SystemAndroid *>(GHOST_ISystem::getSystem());
++  if (system) {
++    system->setVirtualMouseKeyboardRect(rect);
++  }
+ }
+ 
+ uint16_t GHOST_SystemAndroid::getDPIHint()
+diff --git a/intern/ghost/intern/GHOST_SystemAndroid.hh b/intern/ghost/intern/GHOST_SystemAndroid.hh
+index a057c6b6..bbd1e9d5 100644
+--- a/intern/ghost/intern/GHOST_SystemAndroid.hh
++++ b/intern/ghost/intern/GHOST_SystemAndroid.hh
+@@ -9,6 +9,7 @@
+ 
+ #pragma once
+ 
++#include "GHOST_AndroidVirtualMouse.hh"
+ #include "GHOST_Buttons.hh"
+ #include "GHOST_System.hh"
+ 
+@@ -57,6 +58,11 @@ class GHOST_SystemAndroid : public GHOST_System {
+ 
+   uint16_t getDPIHint();
+ 
++  void setVirtualMouseEnabled(bool enabled);
++  const ghost::virtual_mouse::State &getVirtualMouseState();
++  void setVirtualMouseKeyboardRect(ghost::virtual_mouse::Rect rect);
++
++
+   /* Soft keyboard via NativeActivity (no JNI). Note: with NativeActivity the
+    * typed text is not delivered back; hardware keys still work as key events. */
+   GHOST_TSuccess popupOnScreenKeyboard(GHOST_IWindow *window) override;
+@@ -98,6 +104,10 @@ class GHOST_SystemAndroid : public GHOST_System {
+   int32_t handleKeyEvent(AInputEvent *event);
+   int32_t handleMotionEvent(AInputEvent *event);
+ 
++  void updateVirtualMouseViewport();
++  void dispatchVirtualMouseEvent(const ghost::virtual_mouse::Event &event);
++  ghost::virtual_mouse::Controller virtual_mouse_;
++
+   android_app *app_;
+   GHOST_WindowAndroid *window_;
+   uint64_t start_time_;
+diff --git a/scripts/startup/bl_ui/space_statusbar.py b/scripts/startup/bl_ui/space_statusbar.py
+index cc0eb53f..0a92a9ce 100644
+--- a/scripts/startup/bl_ui/space_statusbar.py
++++ b/scripts/startup/bl_ui/space_statusbar.py
+@@ -15,6 +15,8 @@ class STATUSBAR_HT_header(Header):
+         # on screen and within thumb reach whatever workspace is open.
+         layout.operator("wm.virtual_keyboard_toggle", text="KEYBOARD", icon='KEY_MENU')
+ 
++        layout.operator("wm.virtual_mouse_toggle", text="MOUSE", icon='MOUSE_LMB')
++
+         # input status
+         layout.template_input_status()
+ 
+diff --git a/source/blender/windowmanager/CMakeLists.txt b/source/blender/windowmanager/CMakeLists.txt
+index d6b98615..18c41df2 100644
+--- a/source/blender/windowmanager/CMakeLists.txt
++++ b/source/blender/windowmanager/CMakeLists.txt
+@@ -53,6 +53,7 @@ set(SRC
+   intern/wm_uilist_type.cc
+   intern/wm_utils.cc
+   intern/wm_virtual_keyboard.cc
++  intern/wm_virtual_mouse.cc
+   intern/wm_window.cc
+   gizmo/intern/wm_gizmo.cc
+   gizmo/intern/wm_gizmo_group.cc
+diff --git a/source/blender/windowmanager/intern/wm_operators.cc b/source/blender/windowmanager/intern/wm_operators.cc
+index d67f2a95..4001de03 100644
+--- a/source/blender/windowmanager/intern/wm_operators.cc
++++ b/source/blender/windowmanager/intern/wm_operators.cc
+@@ -4286,6 +4286,7 @@ void wm_operatortypes_register()
+   WM_operatortype_append(WM_OT_read_factory_userpref);
+   WM_operatortype_append(WM_OT_window_fullscreen_toggle);
+   WM_operatortype_append(WM_OT_virtual_keyboard_toggle);
++  WM_operatortype_append(WM_OT_virtual_mouse_toggle);
+ #ifdef __ANDROID__
+   WM_operatortype_append(WM_OT_platform_url_open);
+ #endif
+diff --git a/source/blender/windowmanager/intern/wm_virtual_mouse.cc b/source/blender/windowmanager/intern/wm_virtual_mouse.cc
+new file mode 100644
+index 00000000..0e215fe1
+--- /dev/null
++++ b/source/blender/windowmanager/intern/wm_virtual_mouse.cc
+@@ -0,0 +1,192 @@
++/* SPDX-FileCopyrightText: 2026 Blender Authors
++ * SPDX-License-Identifier: GPL-2.0-or-later */
++
++/** \file
++ * \ingroup wm
++ * Android relative mouse overlay. GHOST owns raw touch streams and button state; drawing here
++ * keeps the pointer and controls in the same coordinate space as Blender's virtual keyboard.
++ */
++#include "WM_api.hh"
++#include "WM_types.hh"
++#include "wm.hh"
++#include "BKE_context.hh"
++
++#ifdef __ANDROID__
++#  include <algorithm>
++#  include <cstring>
++#  include "GHOST_AndroidVirtualMouse.hh"
++#  include "DNA_screen_types.h"
++#  include "DNA_windowmanager_types.h"
++#  include "BKE_screen.hh"
++#  include "BLF_api.hh"
++#  include "GPU_immediate.hh"
++#  include "GPU_state.hh"
++#endif
++
++namespace blender {
++#ifdef __ANDROID__
++using namespace ghost::virtual_mouse;
++static wmWindow *mouse_window = nullptr;
++static void *mouse_draw_handle = nullptr;
++
++static void mouse_rect(uint pos, const Rect &rect, float height, const float color[4])
++{
++  immUniformColor4fv(color);
++  immBegin(GPU_PRIM_TRIS, 6);
++  immVertex2f(pos, rect.left, height - rect.top);
++  immVertex2f(pos, rect.right, height - rect.top);
++  immVertex2f(pos, rect.right, height - rect.bottom);
++  immVertex2f(pos, rect.left, height - rect.top);
++  immVertex2f(pos, rect.right, height - rect.bottom);
++  immVertex2f(pos, rect.left, height - rect.bottom);
++  immEnd();
++}
++
++static void mouse_arrow(uint pos, float x, float y, float scale, const float color[4])
++{
++  const float outline[][2] = {{0, 0}, {0, -25}, {6, -19}, {12, -31},
++                              {17, -28}, {11, -17}, {22, -17}};
++  immUniformColor4fv(color);
++  immBegin(GPU_PRIM_TRIS, 15);
++  for (int i = 1; i < 6; i++) {
++    immVertex2f(pos, x, y);
++    immVertex2f(pos, x + outline[i][0] * scale, y + outline[i][1] * scale);
++    immVertex2f(pos, x + outline[i + 1][0] * scale, y + outline[i + 1][1] * scale);
++  }
++  immEnd();
++}
++
++static void mouse_draw(const wmWindow *win, void * /*customdata*/)
++{
++  rcti keyboard;
++  if (WM_virtual_keyboard_rect_get(win, &keyboard)) {
++    GHOST_android_virtual_mouse_set_keyboard_rect(
++        {float(keyboard.xmin), float(win->sizey - keyboard.ymax),
++         float(keyboard.xmax), float(win->sizey - keyboard.ymin)});
++  }
++  else {
++    GHOST_android_virtual_mouse_set_keyboard_rect({});
++  }
++  State state;
++  GHOST_android_virtual_mouse_get_state(&state);
++  if (!state.enabled) {
++    return;
++  }
++  const float panel_color[4] = {0.08f, 0.08f, 0.08f, 0.97f};
++  const float key_color[4] = {0.24f, 0.24f, 0.24f, 1};
++  const float active_color[4] = {0.28f, 0.46f, 0.69f, 1};
++  const float close_color[4] = {0.42f, 0.17f, 0.15f, 1};
++  const float black[4] = {0, 0, 0, 1}, white[4] = {1, 1, 1, 1};
++  GPUVertFormat *format = immVertexFormat();
++  const uint pos = GPU_vertformat_attr_add(format, "pos", gpu::VertAttrType::SFLOAT_32_32);
++  GPU_blend(GPU_BLEND_ALPHA);
++  immBindBuiltinProgram(GPU_SHADER_3D_UNIFORM_COLOR);
++  mouse_rect(pos, state.panel, win->sizey, panel_color);
++  for (int i = 0; i < ControlCount; i++) {
++    Rect rect = state.controls[i];
++    rect.left += 2 * state.scale;
++    rect.right -= 2 * state.scale;
++    rect.top += 3 * state.scale;
++    rect.bottom -= 3 * state.scale;
++    const bool selected = (i >= Left && i <= Right && (state.held & (1 << (i - Left)))) ||
++                          (i == Hold && (state.hold_armed || state.latched));
++    mouse_rect(pos, rect, win->sizey,
++               selected ? active_color : i == Close ? close_color : key_color);
++  }
++  immUnbindProgram();
++
++  const char *labels[] = {"Move", "Left", "Middle", "Right", "Hold", "Wheel -", "Wheel +", "Close"};
++  labels[Hold] = state.latched ? "Release" : state.hold_armed ? "Armed" : "Hold";
++  const int font = BLF_default();
++  for (int i = 0; i < ControlCount; i++) {
++    const Rect &rect = state.controls[i];
++    const char *label = labels[i];
++    const size_t len = std::strlen(label);
++    float size = 13 * state.scale;
++    BLF_size(font, size);
++    const float available = rect.right - rect.left - 8 * state.scale;
++    const float width = BLF_width(font, label, len);
++    if (width > available && width > 0) {
++      size *= available / width;
++      BLF_size(font, size);
++    }
++    BLF_color4fv(font, white);
++    BLF_position(font, (rect.left + rect.right - BLF_width(font, label, len)) * 0.5f,
++                  win->sizey - (rect.top + rect.bottom) * 0.5f - size * 0.32f, 0);
++    BLF_draw(font, label, len);
++  }
++  BLF_batch_draw_flush();
++
++  /* Draw last, above the controls and keyboard. The arrow tip marks the real click position. */
++  format = immVertexFormat();
++  const uint arrow_pos = GPU_vertformat_attr_add(format, "pos", gpu::VertAttrType::SFLOAT_32_32);
++  immBindBuiltinProgram(GPU_SHADER_3D_UNIFORM_COLOR);
++  mouse_arrow(arrow_pos, state.x, win->sizey - state.y, state.scale, black);
++  mouse_arrow(arrow_pos, state.x + 2 * state.scale, win->sizey - state.y - 4 * state.scale,
++              state.scale * 0.70f, white);
++  immUnbindProgram();
++  GPU_blend(GPU_BLEND_NONE);
++}
++#endif
++
++void wm_virtual_mouse_window_close(wmWindow *win)
++{
++#ifdef __ANDROID__
++  if (mouse_window == win) {
++    GHOST_android_virtual_mouse_set_enabled(false);
++    mouse_window = nullptr;
++    mouse_draw_handle = nullptr; /* Window destruction frees its callbacks. */
++  }
++#else
++  (void)win;
++#endif
++}
++
++static wmOperatorStatus virtual_mouse_toggle_exec(bContext *C, wmOperator * /*op*/)
++{
++#ifdef __ANDROID__
++  wmWindow *win = CTX_wm_window(C);
++  if (!win) {
++    return OPERATOR_CANCELLED;
++  }
++  State state;
++  GHOST_android_virtual_mouse_get_state(&state);
++  if (mouse_window && mouse_window != win && mouse_draw_handle) {
++    WM_draw_cb_exit(mouse_window, mouse_draw_handle);
++    mouse_draw_handle = nullptr;
++  }
++  mouse_window = win;
++  if (!mouse_draw_handle) {
++    mouse_draw_handle = WM_draw_cb_activate(win, mouse_draw, nullptr);
++  }
++  GHOST_android_virtual_mouse_set_enabled(!state.enabled);
++  if (bScreen *screen = WM_window_get_active_screen(win)) {
++    screen->do_draw = true;
++  }
++  return OPERATOR_FINISHED;
++#else
++  (void)C;
++  return OPERATOR_CANCELLED;
++#endif
++}
++
++static bool virtual_mouse_poll(bContext *C)
++{
++#ifdef __ANDROID__
++  return WM_operator_winactive(C);
++#else
++  (void)C;
++  return false;
++#endif
++}
++
++void WM_OT_virtual_mouse_toggle(wmOperatorType *ot)
++{
++  ot->name = "Toggle Virtual Mouse";
++  ot->idname = "WM_OT_virtual_mouse_toggle";
++  ot->description = "Swipe to move a mouse pointer; use Left, Middle or Right to click. "
++                    "Tap Hold then a button to drag, and Release to finish. Two fingers scroll";
++  ot->exec = virtual_mouse_toggle_exec;
++  ot->poll = virtual_mouse_poll;
++}
++}  // namespace blender
+diff --git a/source/blender/windowmanager/intern/wm_window.cc b/source/blender/windowmanager/intern/wm_window.cc
+index d101d66f..7a45bb05 100644
+--- a/source/blender/windowmanager/intern/wm_window.cc
++++ b/source/blender/windowmanager/intern/wm_window.cc
+@@ -276,6 +276,7 @@ void wm_window_free(bContext *C, wmWindowManager *wm, wmWindow *win)
+ {
+   /* The on-screen keyboard draws into this window, so it goes with it. */
+   wm_virtual_keyboard_window_close(win);
++  wm_virtual_mouse_window_close(win);
+ 
+   /* Update context. */
+   if (C) {
+diff --git a/source/blender/windowmanager/wm.hh b/source/blender/windowmanager/wm.hh
+index 2e0ae7e8..9a268b94 100644
+--- a/source/blender/windowmanager/wm.hh
++++ b/source/blender/windowmanager/wm.hh
+@@ -140,6 +140,8 @@ void wm_stereo3d_set_cancel(bContext *C, wmOperator *op);
+ /* `wm_virtual_keyboard.cc` */
+ 
+ void WM_OT_virtual_keyboard_toggle(wmOperatorType *ot);
++void WM_OT_virtual_mouse_toggle(wmOperatorType *ot);
++void wm_virtual_mouse_window_close(wmWindow *win);
+ /**
+  * Answer a GHOST pointer event that belongs to the on-screen keyboard.
+  *

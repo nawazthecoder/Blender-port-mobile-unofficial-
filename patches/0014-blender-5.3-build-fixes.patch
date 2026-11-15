@@ -1,0 +1,132 @@
+diff --git a/build_files/android/build_release_dependencies.py b/build_files/android/build_release_dependencies.py
+index db1b85b4..c74f63c9 100644
+--- a/build_files/android/build_release_dependencies.py
++++ b/build_files/android/build_release_dependencies.py
+@@ -129,19 +129,34 @@ def main():
+                      options=('-DRAPIDJSON_BUILD_DOC=OFF', '-DRAPIDJSON_BUILD_EXAMPLES=OFF',
+                               '-DRAPIDJSON_BUILD_TESTS=OFF'),
+                      required=('include/rapidjson/document.h',))
++    zlib_candidates = [LIBDIR / 'zlib/lib/libz.a', LIBDIR / 'zlib/lib/libz.so']
++    zlib_candidates.extend(sorted((LIBDIR / 'zlib/lib').glob('libz.so.*')))
++    zlib_library = next((p for p in zlib_candidates if p.is_file()), None)
++    if zlib_library is None:
++        raise RuntimeError('The pinned Android Zlib library is missing')
+     minizip = build('MINIZIPNG', 'minizipng53',
+                     options=('-DBUILD_SHARED_LIBS=OFF', '-DMZ_BUILD_TESTS=OFF',
+                              '-DMZ_BUILD_UNIT_TESTS=OFF', '-DMZ_BUILD_FUZZ_TESTS=OFF',
+-                             '-DMZ_COMPAT=OFF', '-DMZ_ZLIB=ON', '-DMZ_BZIP2=OFF',
++                             '-DMZ_COMPAT=ON', '-DMZ_ZLIB=ON', '-DMZ_BZIP2=OFF',
+                              '-DMZ_LZMA=OFF', '-DMZ_ZSTD=OFF', '-DMZ_OPENSSL=OFF',
+                              '-DMZ_LIBBSD=OFF', '-DMZ_PKCRYPT=OFF', '-DMZ_WZAES=OFF',
+-                             f'-DZLIB_ROOT={LIBDIR}/zlib'),
++                             '-DMZ_FETCH_LIBS=OFF', '-DMZ_LIBCOMP=OFF', '-DMZ_SIGNING=OFF',
++                             '-DMZ_PPMD=OFF', '-DMZ_ICONV=OFF', '-DMZ_ZLIB_FLAVOR=zlib',
++                             '-DCMAKE_INSTALL_INCLUDEDIR=include/minizip-ng',
++                             f'-DZLIB_ROOT={LIBDIR}/zlib',
++                             f'-DZLIB_LIBRARY={zlib_library}',
++                             f'-DZLIB_INCLUDE_DIR={LIBDIR}/zlib/include'),
+                     required=('lib/libminizip*.a',))
+     host_python = SOURCE / 'lib/linux_x64/python/bin/python3.13'
+     if not host_python.is_file():
+         raise RuntimeError('Matching host Python 3.13 is required for OTIO bindings')
++    pybind11 = build('PYBIND11', 'pybind1153',
++                     options=('-DPYBIND11_TEST=OFF', '-DPYBIND11_NOPYTHON=ON'),
++                     required=('include/pybind11/pybind11.h',
++                               'share/cmake/pybind11/pybind11Config.cmake'))
+     otio = build('OPENTIMELINEIO', 'opentimelineio',
+-          patches=('opentimelineio.diff', 'opentimelineio_shared.diff'),
++          patches=('opentimelineio.diff', 'opentimelineio_shared.diff',
++                   'opentimelineio_android_python.diff'),
+           options=('-DOTIO_SHARED_LIBS=ON', '-DOTIO_AUTOMATIC_SUBMODULES=OFF',
+                    '-DBUILD_TESTING=OFF', '-DOTIO_CXX_INSTALL=ON', '-DOTIO_PYTHON_INSTALL=ON',
+                    '-DOTIO_DEPENDENCIES_INSTALL=OFF', '-DOTIO_FIND_PYBIND11=ON',
+@@ -151,7 +166,7 @@ def main():
+                    f'-DPython_INCLUDE_DIR={LIBDIR}/python/include/python3.13',
+                    f'-DPython_LIBRARY={LIBDIR}/python/lib/libpython3.13.so',
+                    f'-DOTIO_PYTHON_INSTALL_DIR={LIBDIR}/opentimelineio/python',
+-                   f'-DImath_ROOT={LIBDIR}/imath', f'-Dpybind11_ROOT={LIBDIR}/pybind11',
++                   f'-DImath_ROOT={LIBDIR}/imath', f'-Dpybind11_ROOT={pybind11}',
+                    f'-DRapidJSON_ROOT={rapidjson}', f'-Dminizip-ng_ROOT={minizip}',
+                    f'-DZLIB_ROOT={LIBDIR}/zlib'),
+           required=('lib/libopentimelineio.so*', 'python/opentimelineio/__init__.py'))
+@@ -159,12 +174,19 @@ def main():
+     # generic .so suffix; the ELF payload is still built for Android by the NDK.
+     for module in (otio / 'python/opentimelineio').glob('*.cpython-*.so'):
+         module.replace(module.with_name(module.name.split('.cpython-')[0] + '.so'))
++    zstd = build('ZSTD', 'zstd53', source_subdir='build/cmake',
++                 options=('-DZSTD_BUILD_PROGRAMS=OFF', '-DZSTD_BUILD_SHARED=OFF',
++                          '-DZSTD_BUILD_STATIC=ON', '-DZSTD_BUILD_TESTS=OFF',
++                          '-DZSTD_LEGACY_SUPPORT=OFF', '-DZSTD_LZ4_SUPPORT=OFF',
++                          '-DZSTD_LZMA_SUPPORT=OFF', '-DZSTD_MULTITHREAD_SUPPORT=ON',
++                          '-DZSTD_ZLIB_SUPPORT=OFF'),
++                 required=('lib/libzstd.a', 'lib/cmake/zstd/*.cmake'))
+     build('KTX', 'ktx', patches=('ktx_zstd_dep_fix.diff', 'ktx_asan.diff'),
+           options=('-DBUILD_SHARED_LIBS=ON', '-DKTX_FEATURE_TOOLS=OFF',
+                    '-DKTX_FEATURE_TESTS=OFF', '-DKTX_FEATURE_ETC_UNPACK=OFF',
+                    '-DKTX_FEATURE_JNI=OFF', '-DASTCENC_ISA_NEON=ON',
+                    '-DASTCENC_ISA_AVX2=OFF', '-DASTCENC_ISA_SSE41=OFF',
+-                   '-DASTCENC_ISA_SSE2=OFF', f'-Dzstd_ROOT={LIBDIR}/zstd'),
++                   '-DASTCENC_ISA_SSE2=OFF', f'-Dzstd_ROOT={zstd}'),
+           required=('lib/libktx.so*', 'lib/cmake/ktx/*.cmake'))
+ 
+ 
+diff --git a/build_files/build_environment/patches/opentimelineio_android_python.diff b/build_files/build_environment/patches/opentimelineio_android_python.diff
+new file mode 100644
+index 00000000..4965a5f0
+--- /dev/null
++++ b/build_files/build_environment/patches/opentimelineio_android_python.diff
+@@ -0,0 +1,14 @@
++diff --git a/CMakeLists.txt b/CMakeLists.txt
++--- a/CMakeLists.txt
+++++ b/CMakeLists.txt
++@@ -67,3 +67,10 @@
++     find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
+++    if(ANDROID)
+++        # Android modules must name their embedded Python runtime explicitly.
+++        if(NOT Python_LIBRARY OR NOT EXISTS "${Python_LIBRARY}")
+++            message(FATAL_ERROR "Android OTIO needs the target Python shared library")
+++        endif()
+++        set_property(TARGET Python::Module APPEND PROPERTY INTERFACE_LINK_LIBRARIES "${Python_LIBRARY}")
+++    endif()
++     message(STATUS "Python_INCLUDE_DIRS: ${Python_INCLUDE_DIRS}")
++     message(STATUS "Python_VERSION: ${Python_VERSION}")
+diff --git a/intern/ghost/intern/GHOST_ContextVK.cc b/intern/ghost/intern/GHOST_ContextVK.cc
+index 1bf24d3f..c6a604f7 100644
+--- a/intern/ghost/intern/GHOST_ContextVK.cc
++++ b/intern/ghost/intern/GHOST_ContextVK.cc
+@@ -426,8 +426,8 @@ struct GHOST_InstanceVK {
+      * used on the very devices that have it in core. Extensions are unaffected,
+      * which is why the KHR path on older devices never showed this. */
+     uint32_t loader_api_version = VK_API_VERSION_1_0;
+-    if (vkEnumerateInstanceVersion != nullptr &&
+-        vkEnumerateInstanceVersion(&loader_api_version) == VK_SUCCESS)
++    if (volk::vkEnumerateInstanceVersion != nullptr &&
++        volk::vkEnumerateInstanceVersion(&loader_api_version) == VK_SUCCESS)
+     {
+       const uint32_t highest_known = loader_api_version < uint32_t(VK_API_VERSION_1_3) ?
+                                          loader_api_version :
+diff --git a/source/blender/blenlib/intern/kdtree.cc b/source/blender/blenlib/intern/kdtree.cc
+index 5b4eca5e..7d217956 100644
+--- a/source/blender/blenlib/intern/kdtree.cc
++++ b/source/blender/blenlib/intern/kdtree.cc
+@@ -131,7 +131,7 @@ template<typename T> class TreeBuilder {
+     Node *allocate(const int num)
+     {
+       if (used + num > batch.size()) {
+-        this->batch = this->allocator->allocate_array<Node>(batch_size);
++        this->batch = this->allocator->template allocate_array<Node>(batch_size);
+         this->used = 0;
+         /* Only the first batch is sized for the tree, the rest are full size. */
+         this->batch_size = BATCH_SIZE_MAX;
+diff --git a/source/blender/gpu/vulkan/vk_backend.cc b/source/blender/gpu/vulkan/vk_backend.cc
+index 786b6ed9..dee19f5c 100644
+--- a/source/blender/gpu/vulkan/vk_backend.cc
++++ b/source/blender/gpu/vulkan/vk_backend.cc
+@@ -670,7 +670,6 @@ void VKBackend::detect_workarounds(VKDevice &device)
+   extensions.dynamic_rendering_unused_attachments =
+       extensions.dynamic_rendering &&
+       device.supports_extension(VK_EXT_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_EXTENSION_NAME);
+-  extensions.logic_ops = device.physical_device_features_get().logicOp;
+   extensions.maintenance4 = device.supports_extension(VK_KHR_MAINTENANCE_4_EXTENSION_NAME);
+   extensions.memory_priority = device.supports_extension(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME);
+   extensions.pageable_device_local_memory = device.supports_extension(
